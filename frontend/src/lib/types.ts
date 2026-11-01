@@ -700,6 +700,54 @@ export interface PatientRegistered {
  * suspicion, so a row here means two records look alike and nobody has
  * decided yet.
  */
+/**
+ * The clinic's day, for the dashboard.
+ *
+ * A `null` field means the signed-in person holds no permission to read that
+ * part of the clinic — **absent, not zero**. Rendering a withheld figure as
+ * `0` would tell a receptionist the clinic is owed nothing.
+ *
+ * Every amount is derived on the server from the records themselves, so these
+ * figures agree with the ageing report and the cash session by construction
+ * rather than by coincidence.
+ */
+export interface TodayView {
+  business_date: string
+  currency: string
+  appointments: {
+    total: number
+    /** Booked and still awaited: not arrived, cancelled or missed. */
+    expected: number
+    arrived: number
+    completed: number
+    cancelled: number
+    no_show: number
+  } | null
+  patients_registered: number | null
+  treatments_in_progress: number | null
+  treatments_billable: number | null
+  payments: {
+    cash: string
+    card: string
+    transfer: string
+    total: string
+    count: number
+  } | null
+  debt_outstanding: string | null
+  advances_available: string | null
+  drawer: {
+    session_id: string
+    register_code: string
+    business_date: string
+    expected: string
+    /** An open session dated before today: the till was never closed. */
+    from_an_earlier_day: boolean
+  } | null
+  /** Distinguishes "no drawer open" from "not your business". */
+  drawer_readable: boolean
+  duplicate_reviews_pending: number | null
+}
+
 export interface DuplicateReviewDetail {
   id: string
   reason: string

@@ -86,14 +86,52 @@ export const uz = {
     noAccess: 'Sizda bu bo‘limga ruxsat yo‘q.',
   },
   dashboard: {
-    title: 'Boshqaruv paneli',
+    title: 'Bugun klinikada',
     welcome: 'Xush kelibsiz',
+    quickActions: 'Tezkor amallar',
+    nothingVisible:
+      'Sizning ruxsatlaringiz bo‘yicha bu yerda ko‘rsatiladigan ma’lumot yo‘q. Ishni chap tomondagi bo‘limlardan boshlang.',
+
+    takingsToday: 'Bugungi tushum',
+    takingsSplit: 'Naqd {cash} · Karta {card}',
+    debtOutstanding: 'Qarzdorlik',
+    debtHint: 'Hisob-faktura berilgan, hali to‘lanmagan',
+    advancesAvailable: 'Oldindan to‘lov',
+    advancesHint: 'Bemorlar qoldirgan, hali hisobga olinmagan pul',
+    drawerOpen: 'Kassa ochiq',
+    drawerHint: '{register} · kassada bo‘lishi kerak',
+    drawerClosed: 'Kassa yopiq',
+    drawerClosedHint: 'Naqd pul qabul qilish uchun kassani ochish kerak',
+    appointmentsToday: 'Bugungi qabullar',
+    appointmentsSplit: 'Kutilmoqda {expected} · Keldi {arrived} · Bo‘ldi {completed}',
+    appointmentsNonePlanned: 'Bugunga qabul belgilanmagan',
+    patientsRegistered: 'Bugun ro‘yxatga olingan',
+    treatmentsInProgress: 'Tugallanmagan davolash',
+    treatmentsHint: 'Boshlangan yoki kelishilgan, hali tugatilmagan',
+    treatmentsBillable: 'Hisob-faktura kutilmoqda',
+    billableHint: 'Tugatilgan, lekin hisob-faktura berilmagan',
+
+    drawerStale:
+      'Kassa {date} kunidan beri ochiq qolgan ({register}). Bugungi tushum o‘tgan kun smenasiga tushadi.',
+    duplicatesWaiting: 'Takrorlanishi mumkin bo‘lgan {n} bemor qarorni kutmoqda.',
+    billableWaiting:
+      'Tugatilgan {n} davolash uchun hisob-faktura berilmagan — pul so‘ralmagan.',
+    goToCash: 'Kassaga o‘tish',
+    goToDuplicates: 'Takrorlarni ko‘rish',
+    goToPatients: 'Bemorlarga o‘tish',
+
+    actionRegisterPatient: 'Bemorni ro‘yxatga olish',
+    actionFindPatient: 'Bemorni topish',
+    actionInvoice: 'Hisob-faktura',
+    actionPayment: 'To‘lovni qabul qilish',
+    actionOpenDrawer: 'Kassani ochish',
+    actionCloseDrawer: 'Kassani yopish',
+    actionDebts: 'Qarzdorlikni ko‘rish',
+
     organizationCard: 'Tashkilot ma’lumotlari',
     implementationCard: 'Tizim holati',
     implementationHint:
       'Quyidagi ro‘yxat haqiqiy holatni ko‘rsatadi — tayyor bo‘lmagan modullar shunday belgilanadi.',
-    noFinancialDataYet:
-      'Moliyaviy ko‘rsatkichlar buxgalteriya moduli ishga tushgandan keyin paydo bo‘ladi (2-bosqich).',
   },
   organization: {
     title: 'Tashkilot',
@@ -198,11 +236,28 @@ export const uz = {
     usersTab: 'Foydalanuvchilar',
     rolesTab: 'Rollar',
     auditTab: 'Audit',
+    systemTab: 'Tizim holati',
     languageLabel: 'Interfeys tili',
     themeLabel: 'Ko‘rinish',
     themeSystem: 'Tizim bo‘yicha',
     themeLight: 'Yorug‘',
     themeDark: 'Qorong‘i',
+  },
+  systemStatus: {
+    title: 'Tizim holati',
+    description:
+      'Bu dasturning qaysi qismlari tayyor, qaysilari hali emas. Klinika ishiga emas, dasturga tegishli.',
+    sourceNote:
+      'Holat serverdagi modul ro‘yxatidan olinadi. Interfeysda qo‘lda o‘zgartirib qo‘yiladigan yorliq yo‘q.',
+    countAvailable: 'Tayyor: {n}',
+    countPartial: 'Qisman: {n}',
+    countPlanned: 'Rejada: {n}',
+    phase: '{n}-bosqich',
+    worksNow: 'Ishlaydi',
+    notYet: 'Hali yo‘q',
+    nothingDeclared: 'Bu modul haqida ma’lumot berilmagan.',
+    requiresPermission: 'Kerakli ruxsat',
+    notYours: 'Sizga ochiq emas',
   },
   accounting: {
     title: 'Buxgalteriya',

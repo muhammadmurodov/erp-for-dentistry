@@ -44,9 +44,24 @@ MODULES: tuple[ModuleInfo, ...] = (
     ModuleInfo(
         key="dashboard",
         phase=1,
+        # Still PARTIAL, and for a narrower reason than before: the day's
+        # figures are real and derived on the server, but there is no view of
+        # a trend — "is this week better than last" is a question the screen
+        # cannot answer yet. The technical module list moved to
+        # Settings → System status, where an administrator looks for it.
         status=ModuleStatus.PARTIAL,
-        available_features=("organization summary", "module implementation status"),
-        missing_features=("financial KPIs", "cash and revenue charts"),
+        available_features=(
+            "today's takings, split by cash and card",
+            "patient debt and advances held, agreeing with the ageing report",
+            "cash session status, including a till left open from an earlier day",
+            "appointments, patients registered, treatment unfinished and unbilled",
+            "quick actions, offered only where the person may act and a screen exists",
+            "every figure withheld rather than zeroed where the person may not read it",
+        ),
+        missing_features=(
+            "trends: this week against last, and revenue over time",
+            "an appointments screen to go with the count (clinic, phase 3)",
+        ),
     ),
     ModuleInfo(
         key="clinic",

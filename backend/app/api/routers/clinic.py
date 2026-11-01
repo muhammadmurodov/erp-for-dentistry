@@ -55,11 +55,13 @@ from app.modules.clinic.schemas import (
     SettlementRequest,
     SettlementResult,
     SettlementView,
+    TodayResponse,
     TreatmentItemResponse,
     TreatmentPlanResponse,
 )
 from app.modules.clinic.services.patients import PatientService
 from app.modules.clinic.services.settlement import SettlementService
+from app.modules.clinic.services.today import TodayService
 from app.modules.clinic.services.treatments import ItemInput, TreatmentService
 from app.modules.sales.enums import InvoiceStatus
 from app.modules.sales.schemas import InvoiceResponse
@@ -293,6 +295,58 @@ async def merge_patient(
     )
     await db.commit()
     return PatientSummary.model_validate(patient)
+
+
+@router.get(
+    "/today",
+    response_model=TodayResponse,
+)
+async def today(
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+    on: date | None = Query(default=None, description="Defaults to today"),
+) -> TodayResponse:
+    """What is happening in the clinic today.
+
+    Every figure is derived on the server from the records themselves — the
+    outstanding debt through `ReceivablesService`, which is the one definition
+    of what a patient owes, and the drawer's expected cash through
+    `CashSessionService`, which derives it from the movements. Nothing here is
+    a stored total, and nothing is summed in the browser from a truncated
+    list.
+
+    **It returns only what this caller may already read.** Each section is
+    gated on the permission that guards the screen it summarises, and a
+    section the caller may not see is not queried at all, so it comes back
+    `null` rather than zero. A dashboard that aggregates its way around a
+    permission is a permission bug with a chart on it.
+
+    The endpoint itself carries no module gate, so everybody gets a dashboard
+    — the accountant, who may not read a patient, gets the financial half and
+    nothing clinical; the dentist gets the clinical half and no figures. An
+    organization member with none of these permissions gets a page of nulls,
+    which is the honest answer rather than a 403 on the home screen.
+    """
+    organization_id = context.require_organization()
+    view = await TodayService(db, audit).view(
+        organization_id=organization_id,
+        business_date=on,
+        include_appointments=context.has("clinic.appointment.read"),
+        include_patients=context.has("clinic.patient.read"),
+        # Counts of clinical work are clinical signal, so they follow the
+        # clinical permission rather than the patient one (OPEN_QUESTIONS C1).
+        include_clinical=context.has("clinic.clinical.read"),
+        # `reporting.financial.read`, not `sales.invoice.read`: these are the
+        # same clinic-wide aggregates the ageing report serves, and that
+        # report is gated on the reporting permission. A receptionist may read
+        # an individual invoice and may not read the total owed, and a summary
+        # screen is not a way around that.
+        include_money=context.has("reporting.financial.read"),
+        include_drawer=context.has("cash.register.read"),
+        include_duplicates=context.has("clinic.patient.manage"),
+    )
+    return TodayResponse.model_validate(view)
 
 
 @router.get(

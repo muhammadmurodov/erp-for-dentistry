@@ -16,6 +16,7 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 | `tests/accounting/test_reports_and_policy.py` | 28 | Trial balance, statements, policy versioning and supersession, discarding a draft, workbook-derived default policy |
 | `tests/sales/test_billing.py` | 31 | Invoicing, partial payment, over-allocation, advances, refunds |
 | `tests/sales/test_debt_and_advances.py` | 22 | Patient debt and advances; the two ADR-038 ledger regressions; write-off; concurrent allocation |
+| `tests/clinic/test_today.py` | 19 | The dashboard's read model: today's takings by method, work unfinished and unbilled, and — the ones that matter — that the debt equals the ageing report to the som, the advance equals the patient account, and a withheld section is absent rather than zero (ADR-044) |
 | `tests/clinic/test_duplicate_review.py` | 26 | Nothing merges on matching alone; both records stay live until somebody decides; the queue carries both records; which record a merge keeps; a settled pair is not raised again; the superseded record is kept and audited (ADR-042) |
 | `tests/clinic/test_payment_validation.py` | 38 | The four payment scenarios, the derived remaining balance, overpayment at service *and* database level, duplicate submission, two concurrency races, and a cash refund moving the drawer and the ledger together (ADR-040) |
 | `tests/sales/test_receivables.py` | 7 | Ageing buckets, cut-off dates, payments reducing the aged amount |
@@ -37,6 +38,7 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 | Frontend suite | Tests | Covers |
 | --- | --- | --- |
 | `src/lib/money.test.ts` | 25 | Exact decimal arithmetic on `bigint` minor units; the four payment scenarios as the panel computes them; amounts a float would get wrong |
+| `src/lib/dashboard.test.ts` | 27 | Which tiles a person sees, with what emphasis and where they lead; that a withheld figure is never rendered as zero; that no quick action is offered without both the permission and a screen behind it |
 | `src/lib/patientIdentity.test.ts` | 18 | Comparing two patient records: what must and must not count as a difference — case, spacing and telephone formatting are not differences, a blank is *missing* rather than conflicting, and the screen shows the original spelling |
 
 **Two tests skip, and say why.** `test_a_written_off_bill_takes_no_payment`

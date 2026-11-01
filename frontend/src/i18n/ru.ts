@@ -81,14 +81,52 @@ export const ru: Dictionary = {
     noAccess: 'У вас нет доступа к этому разделу.',
   },
   dashboard: {
-    title: 'Панель управления',
+    title: 'Сегодня в клинике',
     welcome: 'Добро пожаловать',
+    quickActions: 'Быстрые действия',
+    nothingVisible:
+      'По вашим правам здесь нечего показать. Начните работу с разделов в меню слева.',
+
+    takingsToday: 'Поступления за день',
+    takingsSplit: 'Наличные {cash} · Карта {card}',
+    debtOutstanding: 'Задолженность',
+    debtHint: 'Выставлено и ещё не оплачено',
+    advancesAvailable: 'Предоплата',
+    advancesHint: 'Деньги пациентов, ещё не отнесённые к счёту',
+    drawerOpen: 'Касса открыта',
+    drawerHint: '{register} · должно быть в кассе',
+    drawerClosed: 'Касса закрыта',
+    drawerClosedHint: 'Для приёма наличных нужно открыть смену',
+    appointmentsToday: 'Приёмы на сегодня',
+    appointmentsSplit: 'Ожидаем {expected} · Пришли {arrived} · Приняты {completed}',
+    appointmentsNonePlanned: 'На сегодня приёмов нет',
+    patientsRegistered: 'Зарегистрировано сегодня',
+    treatmentsInProgress: 'Незавершённое лечение',
+    treatmentsHint: 'Начато или согласовано, ещё не завершено',
+    treatmentsBillable: 'Ожидает счёта',
+    billableHint: 'Завершено, но счёт не выставлен',
+
+    drawerStale:
+      'Касса открыта с {date} ({register}). Сегодняшние поступления попадут в смену прошлого дня.',
+    duplicatesWaiting: 'Возможных дубликатов, ожидающих решения: {n}.',
+    billableWaiting:
+      'Завершённых работ без счёта: {n} — деньги не запрошены.',
+    goToCash: 'Перейти в кассу',
+    goToDuplicates: 'Посмотреть дубликаты',
+    goToPatients: 'Перейти к пациентам',
+
+    actionRegisterPatient: 'Зарегистрировать пациента',
+    actionFindPatient: 'Найти пациента',
+    actionInvoice: 'Выставить счёт',
+    actionPayment: 'Принять оплату',
+    actionOpenDrawer: 'Открыть смену',
+    actionCloseDrawer: 'Закрыть смену',
+    actionDebts: 'Посмотреть задолженность',
+
     organizationCard: 'Данные организации',
     implementationCard: 'Состояние системы',
     implementationHint:
       'Список отражает фактическое состояние — незавершённые модули помечены явно.',
-    noFinancialDataYet:
-      'Финансовые показатели появятся после запуска модуля бухгалтерии (этап 2).',
   },
   organization: {
     title: 'Организация',
@@ -192,11 +230,28 @@ export const ru: Dictionary = {
     usersTab: 'Пользователи',
     rolesTab: 'Роли',
     auditTab: 'Аудит',
+    systemTab: 'Состояние системы',
     languageLabel: 'Язык интерфейса',
     themeLabel: 'Оформление',
     themeSystem: 'Как в системе',
     themeLight: 'Светлое',
     themeDark: 'Тёмное',
+  },
+  systemStatus: {
+    title: 'Состояние системы',
+    description:
+      'Какие части программы готовы, а какие ещё нет. Это о программе, а не о работе клиники.',
+    sourceNote:
+      'Состояние берётся из реестра модулей на сервере. В интерфейсе нет метки, которую можно было бы поправить вручную.',
+    countAvailable: 'Готово: {n}',
+    countPartial: 'Частично: {n}',
+    countPlanned: 'В планах: {n}',
+    phase: 'Этап {n}',
+    worksNow: 'Работает',
+    notYet: 'Пока нет',
+    nothingDeclared: 'По этому модулю ничего не заявлено.',
+    requiresPermission: 'Требуется право',
+    notYours: 'Недоступно вам',
   },
   accounting: {
     title: 'Бухгалтерия',

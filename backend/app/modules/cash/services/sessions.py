@@ -60,6 +60,16 @@ OPERATION_OVERAGE = "cash_overage"
 
 
 @dataclass(frozen=True, slots=True)
+class OpenDrawerSummary:
+    """An open session, as somebody outside this module needs to see it."""
+
+    session_id: uuid.UUID
+    register_code: str
+    business_date: date
+    expected: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class SessionTotals:
     """What the drawer should hold, and how that figure was reached."""
 
@@ -401,6 +411,45 @@ class CashSessionService:
         if movement.kind is not MovementKind.DEPOSIT:
             raise ValidationFailed("Only a cash deposit can be matched to a bank line")
         return movement
+
+    async def open_drawer(self, *, organization_id: uuid.UUID) -> OpenDrawerSummary | None:
+        """The drawer that is open, if one is, with what should be in it.
+
+        Returned as a summary rather than the session row so that a caller
+        outside this module — the dashboard's read model — can report on the
+        till without importing cash's models and acquiring opinions about
+        them (ADR-036).
+
+        One open session per register is a database rule, but a clinic may
+        have several registers, so this takes the oldest open drawer: the one
+        most likely to have been forgotten.
+        """
+        row = (
+            await self._session.execute(
+                select(CashSession, CashRegister.code)
+                .join(
+                    CashRegister,
+                    (CashRegister.id == CashSession.register_id)
+                    & (CashRegister.organization_id == CashSession.organization_id),
+                )
+                .where(
+                    CashSession.organization_id == organization_id,
+                    CashSession.status == SessionStatus.OPEN,
+                )
+                .order_by(CashSession.business_date)
+                .limit(1)
+            )
+        ).first()
+        if row is None:
+            return None
+        session, register_code = row
+        totals = await self.totals(organization_id=organization_id, session_id=session.id)
+        return OpenDrawerSummary(
+            session_id=session.id,
+            register_code=register_code,
+            business_date=session.business_date,
+            expected=totals.expected,
+        )
 
     async def totals(self, *, organization_id: uuid.UUID, session_id: uuid.UUID) -> SessionTotals:
         """Expected cash, derived from the movements. Never read from a column."""

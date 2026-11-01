@@ -80,14 +80,52 @@ export const en: Dictionary = {
     noAccess: 'You do not have access to this section.',
   },
   dashboard: {
-    title: 'Dashboard',
+    title: 'The clinic today',
     welcome: 'Welcome',
+    quickActions: 'Quick actions',
+    nothingVisible:
+      'Nothing here is within your permissions. Start from the sections in the menu on the left.',
+
+    takingsToday: 'Taken today',
+    takingsSplit: 'Cash {cash} · Card {card}',
+    debtOutstanding: 'Owed by patients',
+    debtHint: 'Billed and not yet paid',
+    advancesAvailable: 'Advances held',
+    advancesHint: 'Money patients left that no bill has claimed',
+    drawerOpen: 'Till open',
+    drawerHint: '{register} · expected in the drawer',
+    drawerClosed: 'Till closed',
+    drawerClosedHint: 'A session must be open to take cash',
+    appointmentsToday: 'Appointments today',
+    appointmentsSplit: 'Awaited {expected} · Arrived {arrived} · Seen {completed}',
+    appointmentsNonePlanned: 'Nothing booked for today',
+    patientsRegistered: 'Registered today',
+    treatmentsInProgress: 'Treatment unfinished',
+    treatmentsHint: 'Begun or agreed, not yet finished',
+    treatmentsBillable: 'Waiting to be billed',
+    billableHint: 'Finished, with no bill raised',
+
+    drawerStale:
+      'The till has been open since {date} ({register}). Today’s takings will land in an earlier day’s session.',
+    duplicatesWaiting: '{n} possible duplicate patients are waiting for a decision.',
+    billableWaiting:
+      '{n} finished treatments have no bill — the money has not been asked for.',
+    goToCash: 'Go to the till',
+    goToDuplicates: 'Review duplicates',
+    goToPatients: 'Go to patients',
+
+    actionRegisterPatient: 'Register patient',
+    actionFindPatient: 'Find patient',
+    actionInvoice: 'Raise a bill',
+    actionPayment: 'Take a payment',
+    actionOpenDrawer: 'Open the till',
+    actionCloseDrawer: 'Close the till',
+    actionDebts: 'See who owes',
+
     organizationCard: 'Organization details',
     implementationCard: 'System status',
     implementationHint:
       'This list reflects the real state of the system — unfinished modules are marked as such.',
-    noFinancialDataYet:
-      'Financial figures appear once the accounting module is live (phase 2).',
   },
   organization: {
     title: 'Organization',
@@ -191,11 +229,28 @@ export const en: Dictionary = {
     usersTab: 'Users',
     rolesTab: 'Roles',
     auditTab: 'Audit',
+    systemTab: 'System status',
     languageLabel: 'Interface language',
     themeLabel: 'Appearance',
     themeSystem: 'Match system',
     themeLight: 'Light',
     themeDark: 'Dark',
+  },
+  systemStatus: {
+    title: 'System status',
+    description:
+      'Which parts of the software are finished and which are not. This is about the software, not about the clinic.',
+    sourceNote:
+      'Every status comes from the module registry on the server. There is no label in the interface that could be edited to make something look finished.',
+    countAvailable: 'Ready: {n}',
+    countPartial: 'Partial: {n}',
+    countPlanned: 'Planned: {n}',
+    phase: 'Phase {n}',
+    worksNow: 'Works now',
+    notYet: 'Not yet',
+    nothingDeclared: 'Nothing is declared for this module.',
+    requiresPermission: 'Requires permission',
+    notYours: 'Not available to you',
   },
   accounting: {
     title: 'Accounting',

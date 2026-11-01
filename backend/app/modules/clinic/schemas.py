@@ -180,6 +180,64 @@ class DuplicateReviewResponse(BaseModel):
     decision_note: str | None
 
 
+class AppointmentTallyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    total: int
+    #: Booked and still awaited: not yet arrived, cancelled or missed.
+    expected: int
+    arrived: int
+    completed: int
+    cancelled: int
+    no_show: int
+
+
+class PaymentsTodayResponse(BaseModel, MoneyMixin):
+    model_config = ConfigDict(from_attributes=True)
+
+    cash: Decimal
+    card: Decimal
+    transfer: Decimal
+    total: Decimal
+    count: int
+
+
+class OpenDrawerResponse(BaseModel, MoneyMixin):
+    model_config = ConfigDict(from_attributes=True)
+
+    session_id: uuid.UUID
+    register_code: str
+    business_date: date
+    expected: Decimal
+    from_an_earlier_day: bool
+
+
+class TodayResponse(BaseModel, MoneyMixin):
+    """The clinic's day, for the dashboard.
+
+    A field is `null` where the caller holds no permission to read that part
+    of the clinic — absent rather than zero, because a receptionist shown
+    `0 UZS` owed would reasonably conclude the clinic is owed nothing.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    business_date: date
+    currency: str
+    appointments: AppointmentTallyResponse | None
+    patients_registered: int | None
+    treatments_in_progress: int | None
+    treatments_billable: int | None
+    payments: PaymentsTodayResponse | None
+    debt_outstanding: Decimal | None
+    advances_available: Decimal | None
+    drawer: OpenDrawerResponse | None
+    #: Whether the caller may read the drawer at all, which is how the screen
+    #: tells "no session open" apart from "not your business".
+    drawer_readable: bool
+    duplicate_reviews_pending: int | None
+
+
 class DuplicateReviewDetail(BaseModel):
     """A pending duplicate with both records attached, ready to compare.
 

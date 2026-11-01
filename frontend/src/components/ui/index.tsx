@@ -133,6 +133,33 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: 'sm' | 'md'
 }
 
+/**
+ * The shared button shape, so a control that *navigates* can look like one
+ * without a second set of classes drifting out of step with the first.
+ *
+ * Exported because a link is not a button: a quick action that opens another
+ * screen should be an anchor — middle-clickable, openable in a new tab, and
+ * announced as a link — and wrapping a `<button>` in a router call to fake
+ * that loses all three.
+ */
+export function buttonClassName({
+  variant = 'secondary',
+  size = 'md',
+  className,
+}: {
+  variant?: ButtonVariant
+  size?: 'sm' | 'md'
+  className?: string
+} = {}): string {
+  return clsx(
+    'inline-flex items-center justify-center gap-2 rounded-lg font-medium',
+    'transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+    size === 'sm' ? 'px-2.5 py-1.5 text-xs' : 'px-3.5 py-2 text-sm',
+    BUTTON_VARIANTS[variant],
+    className,
+  )
+}
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   function Button(
     { variant = 'secondary', loading, size = 'md', className, children, ...rest },
@@ -145,13 +172,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         // twice — the same double-submission the backend guards against.
         disabled={rest.disabled || loading}
         aria-busy={loading || undefined}
-        className={clsx(
-          'inline-flex items-center justify-center gap-2 rounded-lg font-medium',
-          'transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-          size === 'sm' ? 'px-2.5 py-1.5 text-xs' : 'px-3.5 py-2 text-sm',
-          BUTTON_VARIANTS[variant],
-          className,
-        )}
+        className={buttonClassName({ variant, size, className })}
         {...rest}
       >
         {loading ? <Spinner size={14} /> : null}

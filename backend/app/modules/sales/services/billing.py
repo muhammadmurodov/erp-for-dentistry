@@ -106,6 +106,17 @@ class CustomerBalance:
     written_off: Decimal = Decimal("0")
 
 
+@dataclass(frozen=True, slots=True)
+class TakingsByMethod:
+    """What came in on one day, by how it was paid."""
+
+    cash: Decimal
+    card: Decimal
+    transfer: Decimal
+    total: Decimal
+    count: int
+
+
 class BillingService:
     def __init__(
         self,
@@ -1041,6 +1052,74 @@ class BillingService:
         through this service's own methods.
         """
         return await self._locked_invoice(organization_id, invoice_id)
+
+    async def takings_on(self, *, organization_id: uuid.UUID, on: date) -> TakingsByMethod:
+        """What was taken on one day, split by method.
+
+        Exposed as a service rather than left to a caller's own query so that
+        "today's takings" has one definition — recorded payments received on
+        that date, with refunded ones excluded, because money that came in and
+        went back out again is not takings.
+        """
+        rows = (
+            await self._session.execute(
+                select(Payment.method, func.coalesce(func.sum(Payment.amount), 0), func.count())
+                .where(
+                    Payment.organization_id == organization_id,
+                    Payment.received_on == on,
+                    Payment.status == PaymentStatus.RECORDED,
+                )
+                .group_by(Payment.method)
+            )
+        ).all()
+        by_method = {method: (Decimal(total), int(count)) for method, total, count in rows}
+
+        def amount(method: PaymentMethod) -> Decimal:
+            return by_method.get(method, (ZERO, 0))[0]
+
+        cash = amount(PaymentMethod.CASH)
+        card = amount(PaymentMethod.CARD)
+        transfer = amount(PaymentMethod.BANK_TRANSFER)
+        return TakingsByMethod(
+            cash=quantize(cash, "UZS"),
+            card=quantize(card, "UZS"),
+            transfer=quantize(transfer, "UZS"),
+            total=quantize(cash + card + transfer, "UZS"),
+            count=sum(count for _, count in by_method.values()),
+        )
+
+    async def total_unapplied(self, *, organization_id: uuid.UUID) -> Decimal:
+        """Every patient's spare money, across the clinic.
+
+        The same arithmetic `unapplied_payments` does for one customer, in one
+        query for all of them: recorded payments less the allocations still
+        standing. A reversed allocation does not count — the money came back
+        off the invoice and is spare again (ADR-038).
+        """
+        received = Decimal(
+            (
+                await self._session.execute(
+                    select(func.coalesce(func.sum(Payment.amount), 0)).where(
+                        Payment.organization_id == organization_id,
+                        Payment.status == PaymentStatus.RECORDED,
+                    )
+                )
+            ).scalar_one()
+        )
+        applied = Decimal(
+            (
+                await self._session.execute(
+                    select(func.coalesce(func.sum(PaymentAllocation.amount), 0)).where(
+                        PaymentAllocation.organization_id == organization_id,
+                        PaymentAllocation.reversed_at.is_(None),
+                    )
+                )
+            ).scalar_one()
+        )
+        spare = received - applied
+        # Allocations cannot exceed their payment, so this cannot go negative;
+        # clamped because a negative "available" would read as a debt.
+        return quantize(spare if spare > ZERO else ZERO, "UZS")
 
     async def unapplied_payments(
         self, *, organization_id: uuid.UUID, customer_id: uuid.UUID

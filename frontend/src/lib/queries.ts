@@ -2,6 +2,7 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { api } from './api'
 import type {
   DuplicateReviewDetail,
+  TodayView,
   Account,
   AccountingPolicy,
   BankAccount,
@@ -93,6 +94,7 @@ export const queryKeys = {
     ['clinic', 'patients', filters] as const,
   patient: (id: string) => ['clinic', 'patient', id] as const,
   duplicateReviews: ['clinic', 'duplicate-reviews'] as const,
+  today: ['clinic', 'today'] as const,
   settlement: (invoiceId: string) => ['clinic', 'settlement', invoiceId] as const,
   settlementHistory: (invoiceId: string) =>
     ['clinic', 'settlement', invoiceId, 'history'] as const,
@@ -473,6 +475,19 @@ export function usePatients(
     queryKey: queryKeys.patients(filters),
     queryFn: () => api.get<PatientSummary[]>('/clinic/patients', filters),
     enabled,
+  })
+}
+
+/**
+ * The clinic's day. Refetched on focus, because a dashboard somebody left
+ * open over lunch should not still be showing the morning's takings.
+ */
+export function useToday(): UseQueryResult<TodayView> {
+  return useQuery({
+    queryKey: queryKeys.today,
+    queryFn: () => api.get<TodayView>('/clinic/today'),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   })
 }
 

@@ -312,14 +312,15 @@ ignore, reopen).
 
 ### Clinic endpoints
 
-24 routes under `/api/v1/clinic`: patients (search, register, detail, edit,
+25 routes under `/api/v1/clinic`: the day's summary for the dashboard,
+patients (search, register, detail, edit,
 merge), duplicate reviews (list, resolve), appointments (list, book, change
 status), encounters (open, complete, list for a patient), treatment items
 (record, list, complete, cancel, correct), treatment plans (create), billing
 (billable items, draft an invoice), and settlement (the remaining balance,
 take a payment, payment history).
 
-**113 routes in the API overall** — 111 under `/api/v1`, plus the two
+**114 routes in the API overall** — 112 under `/api/v1`, plus the two
 health checks. Counted from the generated OpenAPI document, one per
 path-and-method.
 
@@ -379,6 +380,54 @@ exist. It is C-3 in the other direction. Migration 0009 narrows the constraint
 to `(organization_id, payment_id, kind)`, cash is refunded from an open session
 through `POST /cash/sessions/{id}/refunds`, and the generic sales refund route
 now refuses a cash payment and says where to go (ADR-040).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## The dashboard · Rebuilt around the clinic's day
+
+The home screen used to show the organization's registration details and a
+list of module statuses. Both were accurate and neither was any use at eight
+in the morning. It now answers the questions a three-person clinic actually
+opens it for: what was taken today, what is still owed, what advances are
+held, whether the till is open, who is coming in, and what work is unfinished
+or unbilled.
+
+**Every figure is derived on the server and borrowed, never restated**
+(ADR-044). `GET /clinic/today` composes them from the services that own each
+definition — `ReceivablesService.ageing` for the debt, `BillingService` for
+the takings and advances, `CashSessionService.open_drawer` for the till — so
+the dashboard cannot disagree with the ageing report or the cash screen. A
+test asserts the debt matches the report to the som.
+
+**A figure the reader may not see is absent, not zero.** Each section is
+gated on the permission that guards the screen it summarises, and a withheld
+section is not queried at all. The clinic-wide debt follows
+`reporting.financial.read` — the permission that guards the ageing report —
+rather than the weaker `sales.invoice.read`, because an aggregate is a
+capability of its own and a summary screen is not a way around it.
+
+**No decorative controls.** A quick action appears only where the person may
+act *and* the screen exists, which is why there is no "record a treatment"
+button yet.
+
+The technical module list moved to **Settings → System status**, generated
+from the backend registry with no status label hardcoded in the frontend.
+
+Verified: 19 backend cases for the read model, 27 frontend cases for the
+display rules, and the screen driven in Chrome as the owner, the receptionist,
+the cashier and the accountant — four different sets of tiles, in dark and
+light, in all three languages, at desktop and phone widths.
 
 ## Fitted to a clinic of three · Complete
 

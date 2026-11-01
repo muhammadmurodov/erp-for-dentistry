@@ -5,6 +5,7 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import { PageHeader } from '@/components/ui'
 import { OrganizationSettings } from './OrganizationSettings'
 import { DutySeparationCard } from './DutySeparationCard'
+import { SystemStatus } from './SystemStatus'
 import { UsersSettings } from './UsersSettings'
 import { RolesSettings } from './RolesSettings'
 import { AuditSettings } from './AuditSettings'
@@ -31,6 +32,15 @@ export function SettingsPage() {
       visible: can('identity.role.read'),
     },
     { to: 'audit', label: t.settings.auditTab, visible: can('audit.log.read') },
+    {
+      // An administrator's page rather than an operational one, which is why
+      // it lives here and no longer on the dashboard. Anybody who may read
+      // the organization may read it: it describes the software, not the
+      // clinic's money or its patients.
+      to: 'system',
+      label: t.settings.systemTab,
+      visible: can('organization.read'),
+    },
   ].filter((tab) => tab.visible)
 
   const first = tabs[0]?.to ?? 'organization'
@@ -90,6 +100,9 @@ export function SettingsPage() {
         ) : null}
         {can('audit.log.read') ? (
           <Route path="audit" element={<AuditSettings />} />
+        ) : null}
+        {can('organization.read') ? (
+          <Route path="system" element={<SystemStatus />} />
         ) : null}
         <Route path="*" element={<Navigate to={first} replace />} />
       </Routes>

@@ -1185,3 +1185,76 @@ freeze its list would change what a fresh install seeds for no benefit, since
 `0011` now reconciles anything `0001` missed and the declared list catches
 the next addition. The lasting rule is the one in the title, and the cost of
 breaking it was two features that worked on every machine except a real one.
+
+## ADR-044 — The dashboard summarises only what the reader may already see
+
+**Context.** The home screen showed the organization's registration details
+and a list of module statuses. Both were accurate and neither was any use at
+eight in the morning: the owner of a three-person clinic wants to know who is
+coming in, what is still owed, how much went through the till, and whether
+anything needs attention before it becomes a problem. The registration
+details are looked at once a year, and the module statuses are a developer's
+question.
+
+Replacing that with figures raises two risks worth deciding about rather than
+discovering.
+
+**Decision — every figure is derived on the server, and borrowed rather than
+restated.** `GET /clinic/today` returns the whole screen. The outstanding
+debt comes from `ReceivablesService`, which is the one definition of what a
+patient owes (ADR-026); the drawer's expected cash comes from
+`CashSessionService`, which derives it from the movements. The service
+computes nothing a report already computes, because the cheapest way to get
+two different answers is to write the derivation twice, and the first time a
+dashboard disagrees with the ageing report, nobody trusts either again. A
+test asserts the two agree to the som.
+
+It lives in `clinic` because `clinic` is the only module above both `sales`
+and `cash` (ADR-030), so it can read a receivable and a drawer in one place
+without either module learning about the other — and it reads them **through
+their services**, never their models (ADR-036). The first version of this
+read model ran its own aggregate queries over `Payment` and `CashSession`,
+and the architecture test refused it, correctly: "today's takings" and "what
+should be in the drawer" are definitions those modules own. They are now
+`BillingService.takings_on`, `BillingService.total_unapplied` and
+`CashSessionService.open_drawer`, which is also where a second caller will
+look for them.
+
+**Decision — a figure the reader may not see is absent, not zero.** Each
+section is gated on the permission that guards the screen it summarises, and
+a section the caller may not read is **not queried at all**: it returns
+`null`, and the tile does not render. Zero would be worse than hiding it,
+because `0 UZS owed` shown to a receptionist who may not read the total is a
+lie in the shape of a fact.
+
+The gate matters more than it looks. The clinic-wide debt is the same
+aggregate the ageing report serves, and that report requires
+`reporting.financial.read` — so the dashboard requires it too, even though a
+receptionist may read an individual invoice. An aggregate is a capability of
+its own, and a summary screen is not a way around the permission that guards
+it. `drawer_readable` is carried separately so the interface can tell "no
+session is open" apart from "not your business"; otherwise both are `null`
+and the screen has to guess.
+
+The endpoint itself carries no module gate, so everybody gets a dashboard:
+the accountant, who may not read a patient, gets the financial half; the
+dentist gets the clinical half and no figures. A page of nulls is a better
+answer than a 403 on the home screen.
+
+**Decision — no decorative controls.** A quick action appears only when the
+person may perform it *and* the screen it opens exists. There is deliberately
+no "record a treatment" button: the encounter and per-tooth screens are not
+built, and a button that opens nothing is worse than no button, because
+somebody plans their morning around it. What the dashboard does instead is
+count the unfinished and unbilled work and say where it stands.
+
+**Consequences.** The technical module list moved to Settings → System
+status, generated from the backend registry with no status label hardcoded in
+the frontend — there is deliberately no mapping a developer could edit to
+make a module look finished.
+
+The rules — which tile appears, with what emphasis, where it leads, and which
+action is offered — live in `lib/dashboard.ts` as pure functions with 27
+tests, separate from the component that renders them. That split caught its
+first defect immediately: the till tile kept the heading "Till open" above a
+dash when no session was open.
