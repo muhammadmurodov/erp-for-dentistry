@@ -1,6 +1,6 @@
 # Implementation status
 
-**Last updated:** 2026-10-31 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete, and verified in a browser.**
+**Last updated:** 2026-10-31 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete on the money side, with no clinical screens yet.**
 
 The authoritative record of what works. The application serves the same
 information from `GET /api/v1/platform/modules`, and an integration test
@@ -11,11 +11,12 @@ asserts nothing beyond Phase 1 reports itself as `available`.
 Every figure below was produced by running the command shown, not estimated.
 
 ```
-backend:  399 passed in 85.75s     .venv/bin/python -m pytest tests
+backend:  461 passed, 2 skipped in 102.91s   .venv/bin/python -m pytest tests
 lint:     All checks passed!       .venv/bin/ruff check app tests alembic
 schema:   No new upgrade operations detected.   alembic check
 migrate:  downgrade base -> upgrade head: clean (every test run)
-frontend: built in 1.45s           npm run build
+frontend: 25 passed (25)           npm test
+          built in 1.15s           npm run build
           0 problems               npm run lint
           0 errors                 npm run typecheck
 api e2e:  18 passed, 0 failed      HTTP checks against the running API
@@ -25,8 +26,10 @@ ui e2e:   Phase 1: 12 screens driven in Chrome, each inspected
           Phase 3: 10 sales steps driven in Chrome, 0 console errors
           Phase 3b: 10 cash steps driven in Chrome, 0 console errors
           Phase 3d: 18 banking steps driven in Chrome, 0 console errors
+          Phase 3c: 31 clinic steps driven in Chrome, 0 console errors
           Policy:   10 policy steps driven in Chrome, 0 console errors
-                    — both kept as scripts under `frontend/e2e/`, re-runnable
+                    — all three kept as scripts under `frontend/e2e/`,
+                      re-runnable, 0 problems reported on a repeat run
 sql e2e:  12 database invariants verified by raw SQL with the service bypassed
           Phase 3d: 9 more, same method
 docker:   both images build, run, and serve
@@ -151,12 +154,11 @@ posted under it; throw away a draft that was a mistake. Every other role with
 
 ### Accounting endpoints
 
-18 routes under `/api/v1/accounting`: accounts (list, get, create,
+25 routes under `/api/v1/accounting`: accounts (list, get, create,
 deactivate, seed the statutory chart), fiscal years (list, create), periods
 (list, close, reopen), journal (list, get, create, post, reverse, delete a
 draft), policies (list, list rules, create, build from the workbook, set a
 rule, activate, discard a draft), reports (trial balance, account statement).
-**86 routes in the API overall.**
 
 ## Phase 3 — Sales and receivables · Complete (module reports **partial**)
 
@@ -216,8 +218,15 @@ once**. The overpayment is a liability in account 6310 — the statutory
 | One open session per register | `uq_cash_session_one_open_per_register`, a partial unique index |
 | A closed session cannot be changed | `trg_cash_session_immutable` |
 | A non-open session takes no movements | `trg_cash_movement_follows_session` |
-| A payment cannot be counted into a drawer twice | `uq_cash_movement_payment` |
+| A payment cannot be counted into a drawer twice, or paid back out of one twice | `uq_cash_movement_payment_kind` (ADR-040) |
 | A deposit must name its route | `ck_cash_movement_deposit_needs_a_route` |
+
+**Cash is also refunded here, and nowhere else.**
+`POST /cash/sessions/{id}/refunds` reverses the payment and records the money
+leaving this drawer in one transaction; the generic sales refund route refuses
+a cash payment and says so (ADR-040). The session's summary already reports
+refunds alongside receipts, expenses and deposits, but **no screen issues
+one** — it is an API-only operation for now, listed under *Known gaps*.
 
 ### The worked example
 
@@ -298,13 +307,82 @@ yet must not be silently dropped.
 13 routes under `/api/v1/banking`: accounts (list, create, set column
 mapping, deactivate), the recognised column headings, statements (import,
 list runs), transactions (list, get with its matches, candidates, match,
-ignore, reopen). **85 routes in the API overall.**
+ignore, reopen).
+
+### Clinic endpoints
+
+24 routes under `/api/v1/clinic`: patients (search, register, detail, edit,
+merge), duplicate reviews (list, resolve), appointments (list, book, change
+status), encounters (open, complete, list for a patient), treatment items
+(record, list, complete, cancel, correct), treatment plans (create), billing
+(billable items, draft an invoice), and settlement (the remaining balance,
+take a payment, payment history).
+
+**112 routes in the API overall** — 110 under `/api/v1`, plus the two
+health checks. Counted from the generated OpenAPI document, one per
+path-and-method.
+
+## Phase 3c · Clinic — the money side
+
+What works, and what deliberately does not.
+
+**Patients.** Registration with duplicate detection on name plus birth year
+and on telephone number, never refused on a suspicion: the candidates come
+back with the new record and a review is queued. Merging keeps the losing
+record and requires a reason. The clinic has never had a patient number, so
+the stable code the system issues is new, and the review queue exists because
+name and birth year is the only key the clinic has ever used.
+
+**The clinical record** exists as models, services, routes and audit events —
+encounters, per-tooth treatment items in FDI notation, plans spanning visits,
+completion, cancellation and correction. **It has no screens.** A dentist
+cannot yet record a tooth from a browser.
+
+**Settlement.** One submission takes cash, card and an applied advance against
+one bill, inside the invoice's row lock, after a single check of the whole
+submission against the remaining balance. The remaining balance is derived
+everywhere and is an input nowhere: the request schema has no field for it.
+Overpayment is refused by the service, by a database trigger that re-sums
+under the same locks, and by the panel, in that order of authority. A
+resubmitted form replays its first outcome instead of taking the money twice.
+
+**Two ledger defects were found and fixed** before any of this was built, by
+driving the real services and reading the trial balance afterwards: removing
+an allocation left the ledger reporting a receivable the subledger said was
+outstanding, and refunding a payment whose advance had been applied left
+account 6310 — a liability — carrying a debit balance. Both are ADR-038, both
+have regression tests, and the trial balance balanced throughout, which is why
+nothing had caught them.
+
+**The screens have now been driven in a browser** as the two people who
+share the work — reception registers and may not take money, the cashier takes
+money and may not register — and the pass is kept as `frontend/e2e/clinic.cjs`
+so it can be re-run rather than re-done. It found three defects, all in what
+the panel showed rather than what it did, listed below. It also checks the
+ledger at the end: issuing the bill recognises the revenue, and taking the
+money clears the receivable and moves the cash without recognising it again.
+
+**A third defect was found while testing this work**: the over-allocation
+trigger from migration 0003 counted reversed allocations, so after ADR-038 a
+legitimate re-application would have been refused at COMMIT. No test could
+have caught it — the trigger was deferred and the tests never commit. Migration
+0008 rewrites it (ADR-039).
+
+**A fourth was found the same way, in the cash drawer.** `cash_movement` was
+unique on `(organization_id, payment_id)` — the right rule stated too broadly,
+because it also made a refund row for a payment that already had a receipt
+impossible to write. So refunding a cash payment reversed the ledger and left
+the session still expecting the money: the day's count came up short by exactly
+the refund, and the close posted real cash to 9430 as a variance that did not
+exist. It is C-3 in the other direction. Migration 0009 narrows the constraint
+to `(organization_id, payment_id, kind)`, cash is refunded from an open session
+through `POST /cash/sessions/{id}/refunds`, and the generic sales refund route
+now refuses a cash payment and says where to go (ADR-040).
 
 ## Phases 4–7 · Not started
 
 | Phase | Scope | Blocked on |
 | --- | --- | --- |
-| 3c — Clinic | Patients, appointments, treatment plans, service completion | C1 (clinical access rules) |
 | 6 (part) — Statutory reports | Balance sheet, P&L, cash flow | A2, A3 |
 | 4 — Purchasing and inventory | Suppliers, orders, receiving, supplier invoices, stock movements, payables | I1 (valuation method) |
 | 5 — Employees and payroll | Employees, contracts, compensation, attendance, payroll runs, approval, posting | **P2 (current tax rules)**, P3 (commission basis) |
@@ -315,8 +393,22 @@ ignore, reopen). **85 routes in the API overall.**
 
 Stated plainly rather than left to be discovered.
 
-**No frontend component tests.** Vitest is installed and configured; no tests
-are written. The type check and production build do run in CI.
+**Frontend tests cover one module.** `lib/money.ts` has 25 cases, because it
+does arithmetic on money and that is where a float would do real damage. No
+component tests: the payment panel's disabling rules and the forms are covered
+only by the type check, the lint and the build.
+
+**Issuing a cash refund has no screen.** The route, the service, the drawer
+movement and the ledger reversal are built, tested and audited (ADR-040), and
+the cash page displays refunds in the session summary, but giving money back
+still has to be done over the API. It belongs on the cash register screen,
+next to the expense and deposit controls.
+
+**No clinical screens.** See Phase 3c above. The routes and services are
+there and tested; the UI is the patient list, the patient account and the
+payment panel. The duplicate-review queue is the gap a user meets soonest: the
+patient account counts the reviews waiting on a patient and there is no screen
+on which to resolve one.
 
 **No automated browser test in CI.** The UI has been driven in a real Chrome
 and inspected screen by screen (see `TESTING.md`), but that was a manual run.
@@ -558,28 +650,56 @@ had been passing its tests since Phase 2.
     404 in the console after every discard. The selection now only survives
     while the version it names still exists.
 
+## Found by running the clinic in a browser
+
+Driven as reception and then as the cashier. The arithmetic underneath was
+right in all three — every one of these is about what the screen said.
+
+42. **The remaining balance read "0" while the form held more than was
+    owed.** `computeRemaining` clamps at zero, correctly: a balance owed
+    cannot be negative, and `money.ts` has a test saying so. But the panel
+    rendered that clamp beside the words "That is more than is owed", so at
+    the exact moment a cashier had typed too much the figure they look at
+    said the bill was covered. Over the balance, the field now shows the
+    amount the form is over by — `−1 000 UZS` — and the clamp stays where it
+    belongs.
+43. **A payment form was laid out in full for somebody who may not submit
+    one.** A receptionist opening a bill got the cash, card, advance and
+    reference fields, enabled, with "You do not have access to this section"
+    *underneath* them. The refusal is now stated above the form and the
+    fields are disabled, so nobody fills in an amount before finding out.
+44. **The cash drawer was explained twice on one screen**, once as an alert
+    and again as a hint under the cash field, one line apart. Said once now,
+    in the alert.
+
 ## Next step
 
-Phase 3 is now complete except for the clinic module. In order:
+Phase 3 is complete, including the clinic module's financial half. In order:
 
-1. **Phase 3c — the clinic module**: patients, appointments, treatment plans
-   and service completion as a business event. Blocked on `C1` (who may read
-   clinical records), which decides the permission model before any screen is
-   drawn. This is the last piece of Phase 3.
+1. **The clinical screens**: the encounter, the per-tooth record, the
+   treatment plan and the duplicate-review queue. The services and routes are
+   built; what is still open is `C1` (who may read clinical records), which
+   decides what each screen may show before it is drawn. The review queue is
+   the one a user misses first — the patient account already counts the
+   reviews waiting and offers nowhere to settle them.
 2. **Phase 6 (part) — statutory reports**: the balance sheet and P&L, blocked
    on `A2` and `A3`.
 3. **Promote the browser passes into CI**, with the stack as a service and
-   browsers cached. `frontend/e2e/banking.cjs` and `frontend/e2e/policy.cjs`
-   are the first passes kept as scripts rather than done by hand; between
-   them they found ten defects, and both are re-runnable.
+   browsers cached. `frontend/e2e/banking.cjs`, `frontend/e2e/policy.cjs` and
+   `frontend/e2e/clinic.cjs` are the passes kept as scripts rather than done
+   by hand; between them they found thirteen defects, and all three are
+   re-runnable.
 4. **Have an accountant review the workbook-derived policy.** It now has a
    screen to review it on, every rule carries its source note, and nothing
    else in `OPEN_QUESTIONS.md` A1/A4/A5 can be settled without that review.
 
 **Blocked until answered:** `OPEN_QUESTIONS.md` A5 (VAT — still decides
-whether a revenue posting splits into net plus a tax liability), B4 (a bank
-charge on a deposit or transfer), C1 (clinical access rules), S2 (the price
-list).
+whether a revenue posting splits into net plus a tax liability), A7 (which
+account takes a written-off debt — the operation is built and permissioned but
+has no policy rule, so it fails loudly), B4 (a bank charge on a deposit or
+transfer), C1 (clinical access rules), C4 (whether the paper register's
+figures are money at all), S2 (the price list), S3 (whether the clinic bills
+before it collects).
 
 A5 remains the one to ask first: it shapes every revenue posting, and three
 modules now depend on the answer rather than one.

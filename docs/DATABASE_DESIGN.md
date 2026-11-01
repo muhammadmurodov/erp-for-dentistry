@@ -188,6 +188,108 @@ MoneyType = Numeric(20, 4, asdecimal=True)
 decimals leave room for intermediate values while posted UZS amounts are
 quantized to two.
 
+## Phase 3c schema · the clinic and settlement
+
+```mermaid
+erDiagram
+    PATIENT ||--o{ APPOINTMENT : books
+    PATIENT ||--o{ ENCOUNTER : attends
+    PATIENT ||--o{ TREATMENT_PLAN : "agrees to"
+    PATIENT ||--o{ PATIENT_DUPLICATE_REVIEW : "may duplicate"
+    PATIENT ||--o| CUSTOMER : "is billed as"
+    ENCOUNTER ||--o{ TREATMENT_ITEM : records
+    TREATMENT_PLAN ||--o{ TREATMENT_ITEM : "spans visits of"
+    SERVICE ||--o{ TREATMENT_ITEM : prices
+    TREATMENT_ITEM ||--o| INVOICE_LINE : "billed as"
+    INVOICE ||--o{ SETTLEMENT_REQUEST : "settled by"
+```
+
+| Table | Notes |
+| --- | --- |
+| `patient` | Almost every column nullable, deliberately: the clinic's own register leaves the birth year and address blank on a good proportion of rows, and records a *year* of birth, not a date. `customer_id` is the one link to the money |
+| `patient_duplicate_review` | A suspected duplicate awaiting a human decision. `DISTINCT` is recorded as well as `MERGED`, so the same pair is not raised at every visit |
+| `appointment` | A promise about time. Carries nothing financial |
+| `encounter` | One visit. Behind `clinic.clinical.read`: complaint, notes, body weight |
+| `treatment_plan` | A course of work spanning visits, which is what prosthetics is |
+| `treatment_item` | **One tooth, one service, one status.** FDI tooth numbers, checked in SQL as well as in Python. `invoice_line_id` is the single link from clinical work to money |
+| `settlement_request` | One submission of the payment form, so it cannot be replayed |
+
+**The clinic stores no balance.** There is no debt column on `patient` and no
+price a patient owes on `treatment_item` — only the price basis used and the
+invoice line it produced. A patient's debt is read from the sales service,
+which derives it from the invoice total and its live allocations. Anything
+else would be a second receivables ledger free to disagree with the first,
+which is exactly the situation the clinic has today with a paper register on
+one side and a spreadsheet on the other.
+
+`settlement_request` looks like an exception and is not: it holds the amounts
+as submitted and the ids of the payments they produced, and no balance at all.
+Its purpose is the unique `(organization_id, request_key)`, which makes a
+double-click, a retried request or a refreshed page settle a bill once.
+
+### Notable constraints
+
+```sql
+-- Only completed work is ever billed, and a billed item carries both the
+-- line and the price it went out at. Three constraints rather than one, so
+-- a violation says which rule was broken.
+CHECK (invoice_line_id IS NULL OR status = 'COMPLETED')
+CHECK ((invoice_line_id IS NULL) = (billed_at IS NULL))
+CHECK (invoice_line_id IS NULL OR unit_price IS NOT NULL)
+
+-- A tooth that does not exist is a typo, and cheaper to catch here than to
+-- discover later that a filling was recorded on nothing. FDI notation:
+-- 11-18, 21-28, 31-38, 41-48 permanent; 51-55, 61-65, 71-75, 81-85 milk.
+CHECK (tooth_number IS NULL
+       OR (mod(tooth_number, 10) BETWEEN 1 AND 8 AND (tooth_number / 10) BETWEEN 1 AND 4)
+       OR (mod(tooth_number, 10) BETWEEN 1 AND 5 AND (tooth_number / 10) BETWEEN 5 AND 8))
+
+-- An allocation is reversed, never deleted (ADR-038), so uniqueness applies
+-- to live rows only: the same payment may legitimately be applied to the
+-- same invoice again after a reversal, while a double-click still cannot
+-- settle an invoice twice.
+CREATE UNIQUE INDEX uq_payment_allocation_live
+    ON payment_allocation (organization_id, payment_id, invoice_id)
+    WHERE reversed_at IS NULL;
+CHECK ((reversed_at IS NULL) = (reversal_reason IS NULL))
+
+-- A written-off debt is not a voided invoice. Voiding reverses the revenue;
+-- writing off leaves it standing and clears the receivable to an expense.
+-- Separate columns and a separate status, so one cannot be disguised as the
+-- other.
+invoice.written_off_at, invoice.write_off_reason, invoice.written_off_by_user_id
+```
+
+### The over-allocation guard
+
+An invoice can never have more allocated against it than it is worth, and a
+payment never more than was received. The rule sums sibling rows, so no
+`CHECK` can express it; it is a trigger.
+
+```sql
+CREATE TRIGGER trg_payment_allocation_within_limits
+    AFTER INSERT OR UPDATE OR DELETE ON payment_allocation
+    FOR EACH ROW EXECUTE FUNCTION assert_allocation_within_limits();
+```
+
+The function locks the invoice, then the payment — **the same order every
+other path takes them** — and sums live rows only, scoped by organization.
+Three properties follow, and each was learned the hard way:
+
+* **Live rows only.** The original version, from migration 0003, summed every
+  row. When ADR-038 made allocations reversible without updating it, it began
+  counting money that had been taken back off, and a legitimate
+  re-application after a reversal would have been refused at COMMIT. Migration
+  0008 fixed it.
+* **Not deferred.** The original was `DEFERRABLE INITIALLY DEFERRED`, which
+  meant it fired at COMMIT — and therefore **never fired in the test suite at
+  all**, because every test runs in a transaction that is rolled back. That is
+  why the bug above was invisible. An immediate trigger raises at the
+  statement that caused it, which both names the offending row and makes the
+  guard testable.
+* **It takes the locks itself.** Without them, two transactions each insert a
+  row, each sums without seeing the other, and both pass.
+
 ## Concurrency
 
 The scenario to prevent: two cashiers apply the same payment at the same
@@ -196,8 +298,12 @@ moment.
 | Mechanism | Role |
 | --- | --- |
 | Unique idempotency key on `posting_event` | **Primary.** The second insert fails regardless of timing |
-| `SELECT ... FOR UPDATE` on the invoice | Serialises concurrent allocations |
+| Unique `(organization_id, request_key)` on `settlement_request` | **Primary** for a resubmitted payment form. A duplicate blocks on the index rather than reading a stale balance, then replays the first outcome |
+| `SELECT ... FOR UPDATE` on the invoice | Serialises concurrent allocations and composite settlements |
+| **One lock order: invoice, then payment** | Every path agrees — the allocation service, the composite settlement above it, and the trigger — so two settlements queue instead of deadlocking |
 | Allocation sum check under that lock | Prevents over-allocation |
+| `trg_payment_allocation_within_limits` | The same check in the database, which holds whatever code path reaches the table |
+| Partial unique index on live allocations | The same payment cannot be applied to one invoice twice |
 | One transaction per service call | Partial work is impossible |
 
 A preliminary "is this already posted?" check is never the only defence.
@@ -205,8 +311,11 @@ Check-then-act is two statements with a gap, and the gap is where the
 duplicate appears. The constraint closes it; the check only improves the error
 message.
 
-Phase 2 adds concurrency tests that post the same event from parallel
-transactions and assert exactly one succeeds.
+Concurrency tests run the real races on committed connections, because a
+check-then-act gap cannot be shown inside one shared transaction: posting the
+same event twice, allocating one payment twice, settling one bill from two
+sessions, and submitting one payment form twice at once. Each asserts that
+exactly one attempt succeeded and that the money moved once.
 
 ## Indexes
 
@@ -228,7 +337,11 @@ balance.
 
 One migration per phase, named for it. `0001_phase1_foundation.py` creates the
 Phase 1 schema, installs the audit trigger and seeds the permission catalogue,
-the nine system roles and four currencies.
+the nine system roles and four currencies. Where a later revision fixes an
+earlier one rather than adding to it — `0008` rewriting the `0003`
+over-allocation guard — the downgrade restores the earlier definition
+verbatim, bug included, because a downgrade that silently keeps the fix is not
+a downgrade.
 
 Seeding reference data **from the Python permission registry** means a role
 grant is validated by a foreign key rather than by a string somebody hoped was

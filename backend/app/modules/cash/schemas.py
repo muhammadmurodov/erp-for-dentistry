@@ -99,6 +99,17 @@ class OpenSessionRequest(BaseModel, MoneyMixin):
         return _reject_float(value)
 
 
+class CashRefundRequest(BaseModel):
+    """Refund a cash payment out of the open drawer.
+
+    No amount: a refund is of the whole payment, and the figure comes from
+    the payment record rather than from whoever is asking.
+    """
+
+    payment_id: uuid.UUID
+    reason: str = Field(min_length=3, max_length=1000)
+
+
 class CashExpenseRequest(BaseModel, MoneyMixin):
     amount: Decimal
     description: str = Field(min_length=1, max_length=1000)

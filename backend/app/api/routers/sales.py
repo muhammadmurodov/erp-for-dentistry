@@ -10,8 +10,9 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import AuditDep, DbSession, OrgCtx, require_permissions
+from app.core.errors import ValidationFailed
 from app.core.money import ZERO, quantize
-from app.modules.sales.enums import InvoiceStatus, PaymentStatus
+from app.modules.sales.enums import InvoiceStatus, PaymentMethod, PaymentStatus
 from app.modules.sales.models import Invoice, Payment
 from app.modules.sales.schemas import (
     AgeingBucket,
@@ -38,6 +39,7 @@ from app.modules.sales.schemas import (
     ServiceResponse,
     ServiceWithPrice,
     VoidInvoiceRequest,
+    WriteOffRequest,
 )
 from app.modules.sales.services.billing import BillingService, InvoiceLineInput
 from app.modules.sales.services.catalogue import CatalogueService
@@ -423,6 +425,36 @@ async def void_invoice(
     return await _invoice_detail(db, audit, organization_id, invoice)
 
 
+@router.post(
+    "/invoices/{invoice_id}/write-off",
+    response_model=InvoiceDetail,
+    dependencies=[Depends(require_permissions("sales.debt.write_off"))],
+)
+async def write_off_debt(
+    invoice_id: uuid.UUID,
+    payload: WriteOffRequest,
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+) -> InvoiceDetail:
+    """Give up on collecting an outstanding debt.
+
+    Not the same act as voiding: the revenue stands and the loss falls in the
+    period the decision was taken. The permission sits with the owner, not
+    the accountant who keeps the ledger.
+    """
+    organization_id = context.require_organization()
+    invoice = await BillingService(db, audit).write_off_debt(
+        organization_id=organization_id,
+        invoice_id=invoice_id,
+        reason=payload.reason,
+        written_off_on=payload.written_off_on,
+        actor_user_id=context.user_id,
+    )
+    await db.commit()
+    return await _invoice_detail(db, audit, organization_id, invoice)
+
+
 # --------------------------------------------------------------- payments
 
 
@@ -508,6 +540,15 @@ async def record_payment(
     revenue.
     """
     organization_id = context.require_organization()
+    if payload.method is PaymentMethod.CASH:
+        # Cash taken here would debit 5010 without ever reaching a drawer, so
+        # the session count would report the money as missing and post it to
+        # 9430 as a shortage. Cash goes through the session that holds it.
+        raise ValidationFailed(
+            "Cash is taken through an open cash session, not here. "
+            "Use the cash register screen so the drawer and the ledger agree.",
+            details={"method": payload.method.value},
+        )
     payment = await BillingService(db, audit).record_payment(
         organization_id=organization_id,
         customer_id=payload.customer_id,
@@ -568,7 +609,21 @@ async def refund_payment(
     """Reverse a payment in full. Requires approval authority, not just the
     ability to take payments — a cashier cannot refund their own takings."""
     organization_id = context.require_organization()
-    payment = await BillingService(db, audit).refund_payment(
+    billing = BillingService(db, audit)
+    existing = await billing.get_payment(
+        organization_id=organization_id, payment_id=payment_id
+    )
+    if existing.method is PaymentMethod.CASH:
+        # The same reason cash is not *taken* here: reversing the ledger
+        # without recording that the money left a till leaves the drawer
+        # expecting it, and the day's count reports a shortage that is not
+        # one (ADR-040).
+        raise ValidationFailed(
+            "Cash is refunded from an open cash session, not here. "
+            "Use the cash register screen so the drawer and the ledger agree.",
+            details={"method": existing.method.value},
+        )
+    payment = await billing.refund_payment(
         organization_id=organization_id,
         payment_id=payment_id,
         reason=payload.reason,
@@ -579,19 +634,23 @@ async def refund_payment(
 
 
 @router.post(
-    "/allocations/{allocation_id}/remove",
+    "/allocations/{allocation_id}/reverse",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_permissions("sales.payment.record"))],
 )
-async def remove_allocation(
+async def reverse_allocation(
     allocation_id: uuid.UUID,
     payload: RemoveAllocationRequest,
     context: OrgCtx,
     db: DbSession,
     audit: AuditDep,
 ) -> None:
-    """Unapply money from an invoice. Audited with its reason."""
-    await BillingService(db, audit).remove_allocation(
+    """Unapply money from an invoice.
+
+    The allocation is kept and marked reversed, and any entry it posted is
+    reversed with it, so the ledger and the subledger move together.
+    """
+    await BillingService(db, audit).reverse_allocation(
         organization_id=context.require_organization(),
         allocation_id=allocation_id,
         reason=payload.reason,

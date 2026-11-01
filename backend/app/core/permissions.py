@@ -56,6 +56,10 @@ PERMISSIONS: tuple[Permission, ...] = (
     _p("sales.payment.record", "sales", "Record a customer payment", True),
     _p("sales.refund.request", "sales", "Request a refund"),
     _p("sales.refund.approve", "sales", "Approve a refund", True),
+    # Deliberately not granted to the accountant. The accountant's role lists
+    # sales permissions one by one, while the director's holds `sales.*`, so
+    # clearing a patient's debt is the owner's act and nobody else's.
+    _p("sales.debt.write_off", "sales", "Write off an uncollectable patient debt", True),
     # --- Cash ---------------------------------------------------------------
     _p("cash.register.read", "cash", "View cash registers and sessions"),
     _p("cash.register.manage", "cash", "Create and configure cash registers", True),

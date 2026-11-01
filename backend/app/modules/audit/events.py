@@ -47,8 +47,16 @@ POLICY_DISCARDED: Final = "accounting.policy.discarded"
 
 # --- money movement (Phase 3+) ---------------------------------------------
 PAYMENT_RECORDED: Final = "sales.payment.recorded"
+PAYMENT_ALLOCATED: Final = "sales.payment.allocated"
+#: One submission of the payment form: cash, card, an applied advance, or a
+#: mixture, taken against one invoice as a single act.
+INVOICE_SETTLED: Final = "sales.invoice.settled"
+ALLOCATION_REVERSED: Final = "sales.payment.allocation_reversed"
 REFUND_REQUESTED: Final = "sales.refund.requested"
 REFUND_APPROVED: Final = "sales.refund.approved"
+#: Clearing an uncollectable debt. Separate from voiding an invoice, which
+#: says the sale never happened: a write-off leaves the revenue standing.
+DEBT_WRITTEN_OFF: Final = "sales.debt.written_off"
 CASH_SESSION_OPENED: Final = "cash.session.opened"
 CASH_SESSION_CLOSED: Final = "cash.session.closed"
 CASH_COUNT_SUBMITTED: Final = "cash.count.submitted"
@@ -62,6 +70,20 @@ STOCK_ADJUSTED: Final = "inventory.stock.adjusted"
 PAYROLL_CALCULATED: Final = "payroll.run.calculated"
 PAYROLL_APPROVED: Final = "payroll.run.approved"
 PAYROLL_POSTED: Final = "payroll.run.posted"
+
+# --- clinic (Phase 3c) ------------------------------------------------------
+PATIENT_REGISTERED: Final = "clinic.patient.registered"
+PATIENT_UPDATED: Final = "clinic.patient.updated"
+#: Joining two records into one person. Never automatic, always reasoned.
+PATIENT_MERGED: Final = "clinic.patient.merged"
+ENCOUNTER_OPENED: Final = "clinic.encounter.opened"
+ENCOUNTER_COMPLETED: Final = "clinic.encounter.completed"
+TREATMENT_RECORDED: Final = "clinic.treatment.recorded"
+TREATMENT_COMPLETED: Final = "clinic.treatment.completed"
+TREATMENT_CORRECTED: Final = "clinic.treatment.corrected"
+TREATMENT_BILLED: Final = "clinic.treatment.billed"
+APPOINTMENT_BOOKED: Final = "clinic.appointment.booked"
+APPOINTMENT_CHANGED: Final = "clinic.appointment.changed"
 
 # --- privacy ----------------------------------------------------------------
 CLINICAL_RECORD_READ: Final = "clinic.clinical.read"
@@ -80,7 +102,9 @@ REQUIRED_AUDIT_ACTIONS: Final[frozenset[str]] = frozenset(
         PERIOD_CLOSED,
         PERIOD_REOPENED,
         PAYMENT_RECORDED,
+        ALLOCATION_REVERSED,
         REFUND_APPROVED,
+        DEBT_WRITTEN_OFF,
         CASH_DISCREPANCY_APPROVED,
         STOCK_ADJUSTED,
         PAYROLL_APPROVED,
@@ -88,5 +112,7 @@ REQUIRED_AUDIT_ACTIONS: Final[frozenset[str]] = frozenset(
         ROLE_GRANTED,
         ROLE_REVOKED,
         CLINICAL_RECORD_READ,
+        PATIENT_MERGED,
+        TREATMENT_COMPLETED,
     }
 )

@@ -23,6 +23,7 @@ from app.modules.cash.schemas import (
     CashExpenseRequest,
     CashMovementResponse,
     CashPaymentRequest,
+    CashRefundRequest,
     CashRegisterCreateRequest,
     CashRegisterResponse,
     CashSessionDetail,
@@ -221,6 +222,73 @@ async def take_cash_payment(
     response = PaymentResponse.model_validate(payment)
     response.allocated = allocated
     response.advance = payment.amount - allocated
+    return response
+
+
+@router.post(
+    "/sessions/{session_id}/refunds",
+    response_model=PaymentResponse,
+    dependencies=[Depends(require_permissions("sales.refund.approve"))],
+)
+async def refund_cash_payment(
+    session_id: uuid.UUID,
+    payload: CashRefundRequest,
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+) -> PaymentResponse:
+    """Give a cash payment back out of this drawer.
+
+    The mirror of taking one, and here for the same reason: `sales` reverses
+    every entry the payment produced, `cash` records that the money left this
+    till. Reversing the ledger without the drawer movement left the session
+    expecting cash that had been handed back, so the day's count reported a
+    shortage and real money was written off as a variance (ADR-040).
+
+    The drawer is this one, not necessarily the one that took the payment: a
+    refund given the next day comes out of the till that is open now.
+    """
+    organization_id = context.require_organization()
+    billing = BillingService(db, audit)
+    cash = CashSessionService(db, audit)
+
+    # Fail before reversing anything if the drawer is not open.
+    session = await cash.get_session(organization_id=organization_id, session_id=session_id)
+    if session.status is not SessionStatus.OPEN:
+        raise Conflict(
+            f"This cash session is {session.status.value.lower()} and cannot refund a payment",
+            details={"status": session.status.value},
+        )
+
+    payment = await billing.get_payment(
+        organization_id=organization_id, payment_id=payload.payment_id
+    )
+    if payment.method is not PaymentMethod.CASH:
+        raise Conflict(
+            "That payment was not taken in cash, so it is not refunded from a "
+            "drawer. Refund it through the payment it was taken by.",
+            details={"method": payment.method.value},
+        )
+
+    refunded = await billing.refund_payment(
+        organization_id=organization_id,
+        payment_id=payload.payment_id,
+        reason=payload.reason,
+        actor_user_id=context.user_id,
+    )
+    await cash.record_payment_refund(
+        organization_id=organization_id,
+        session_id=session_id,
+        payment_id=refunded.id,
+        amount=refunded.amount,
+        description=f"Refund of {refunded.number}",
+        actor_user_id=context.user_id,
+    )
+    await db.commit()
+
+    response = PaymentResponse.model_validate(refunded)
+    response.allocated = Decimal("0")
+    response.advance = Decimal("0")
     return response
 
 

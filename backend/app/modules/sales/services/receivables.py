@@ -121,6 +121,7 @@ class ReceivablesService:
                     .where(
                         PaymentAllocation.organization_id == organization_id,
                         PaymentAllocation.invoice_id.in_([inv.id for inv, _ in invoices]),
+                        PaymentAllocation.reversed_at.is_(None),
                     )
                     .group_by(PaymentAllocation.invoice_id)
                 )

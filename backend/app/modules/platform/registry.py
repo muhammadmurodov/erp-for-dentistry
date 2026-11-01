@@ -51,13 +51,24 @@ MODULES: tuple[ModuleInfo, ...] = (
     ModuleInfo(
         key="clinic",
         phase=3,
-        status=ModuleStatus.PLANNED,
+        # PARTIAL, and the split matters: the money side of a patient's visit
+        # is built and tested end to end, while the clinical side exists as
+        # services and routes with no screen behind them. A dentist cannot
+        # yet record a tooth from a browser, and saying so is more use than
+        # a status that implies they can.
+        status=ModuleStatus.PARTIAL,
         required_permission="clinic.patient.read",
+        available_features=(
+            "patient registration with duplicate review",
+            "patient account: debt, advances and bills",
+            "payment: cash, card, advances, with a derived remaining balance",
+            "drafting an invoice from completed treatment",
+        ),
         missing_features=(
-            "patient registration",
-            "appointment scheduling",
-            "treatment plans",
-            "completed service records",
+            "appointment scheduling screen",
+            "clinical record screen: encounters, teeth, findings",
+            "treatment plan screen",
+            "duplicate review queue screen",
         ),
     ),
     ModuleInfo(

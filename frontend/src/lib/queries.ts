@@ -27,11 +27,15 @@ import type {
   Invoice,
   InvoiceDetail,
   MatchCandidate,
+  PatientDetail,
+  PatientSummary,
   Payment,
   PaymentDetail,
   ReceivablesAgeing,
   Role,
   ServiceItem,
+  SettlementHistoryRow,
+  SettlementView,
   StatementImport,
   TrialBalance,
 } from './types'
@@ -84,6 +88,12 @@ export const queryKeys = {
     ['banking', 'transactions', filters] as const,
   bankTransaction: (id: string) => ['banking', 'transaction', id] as const,
   matchCandidates: (id: string) => ['banking', 'candidates', id] as const,
+  patients: (filters: Record<string, unknown>) =>
+    ['clinic', 'patients', filters] as const,
+  patient: (id: string) => ['clinic', 'patient', id] as const,
+  settlement: (invoiceId: string) => ['clinic', 'settlement', invoiceId] as const,
+  settlementHistory: (invoiceId: string) =>
+    ['clinic', 'settlement', invoiceId, 'history'] as const,
 }
 
 export function useModules(): UseQueryResult<ModuleInfo[]> {
@@ -447,5 +457,62 @@ export function useMatchCandidates(
     queryFn: () =>
       api.get<MatchCandidate[]>(`/banking/transactions/${id}/candidates`),
     enabled: Boolean(id),
+  })
+}
+
+
+// --- clinic -----------------------------------------------------------------
+
+export function usePatients(
+  enabled: boolean,
+  filters: { query?: string } = {},
+): UseQueryResult<PatientSummary[]> {
+  return useQuery({
+    queryKey: queryKeys.patients(filters),
+    queryFn: () => api.get<PatientSummary[]>('/clinic/patients', filters),
+    enabled,
+  })
+}
+
+export function usePatient(
+  id: string | null,
+): UseQueryResult<PatientDetail> {
+  return useQuery({
+    queryKey: queryKeys.patient(id ?? ''),
+    queryFn: () => api.get<PatientDetail>(`/clinic/patients/${id}`),
+    enabled: Boolean(id),
+  })
+}
+
+/**
+ * The remaining balance and everything around it.
+ *
+ * Never cached beyond the moment: a stale balance is exactly the figure the
+ * panel must not show, and another cashier may have taken money a second ago.
+ */
+export function useSettlement(
+  invoiceId: string | null,
+): UseQueryResult<SettlementView> {
+  return useQuery({
+    queryKey: queryKeys.settlement(invoiceId ?? ''),
+    queryFn: () =>
+      api.get<SettlementView>(`/clinic/invoices/${invoiceId}/settlement`),
+    enabled: Boolean(invoiceId),
+    staleTime: 0,
+    gcTime: 0,
+  })
+}
+
+export function useSettlementHistory(
+  invoiceId: string | null,
+): UseQueryResult<SettlementHistoryRow[]> {
+  return useQuery({
+    queryKey: queryKeys.settlementHistory(invoiceId ?? ''),
+    queryFn: () =>
+      api.get<SettlementHistoryRow[]>(
+        `/clinic/invoices/${invoiceId}/settlement/history`,
+      ),
+    enabled: Boolean(invoiceId),
+    staleTime: 0,
   })
 }

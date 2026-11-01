@@ -492,3 +492,28 @@ def importer(db: AsyncSession, audit: AuditRecorder):
     from app.modules.banking.services.statement_import import StatementImporter
 
     return StatementImporter(db, audit)
+
+
+# --- clinic fixtures --------------------------------------------------------
+
+
+@pytest.fixture
+def patients(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.clinic.services.patients import PatientService
+
+    return PatientService(db, audit)
+
+
+@pytest.fixture
+def treatments(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.clinic.services.treatments import TreatmentService
+
+    return TreatmentService(db, audit)
+
+
+@pytest.fixture
+def settlement(db: AsyncSession, audit: AuditRecorder):
+    """The composite settlement service: receivable and drawer in one act."""
+    from app.modules.clinic.services.settlement import SettlementService
+
+    return SettlementService(db, audit)

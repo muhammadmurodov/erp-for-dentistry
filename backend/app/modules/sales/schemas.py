@@ -198,6 +198,19 @@ class VoidInvoiceRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=1000)
 
 
+class WriteOffRequest(BaseModel):
+    """Give up on an outstanding debt.
+
+    The reason is mandatory and is written to the audit trail: a debt that
+    disappears without one is indistinguishable from a debt somebody erased.
+    """
+
+    reason: str = Field(min_length=3, max_length=1000)
+    #: The date the decision was taken. Defaults to today; the loss belongs in
+    #: the period the clinic gave up, not the one it billed in.
+    written_off_on: date | None = None
+
+
 # -------------------------------------------------------------- payments
 
 

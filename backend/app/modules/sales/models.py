@@ -27,6 +27,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -227,6 +228,17 @@ class Invoice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     void_reason: Mapped[str | None] = mapped_column(Text)
 
+    #: A written-off debt is **not** a voided invoice. Voiding says the
+    #: invoice should never have existed and reverses the revenue; writing off
+    #: says the revenue was earned and the money will not arrive. Keeping them
+    #: apart is what stops an uncollectable debt being disguised as a billing
+    #: error — and stops revenue being restated in a period already reported.
+    written_off_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    write_off_reason: Mapped[str | None] = mapped_column(Text)
+    written_off_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("app_user.id", ondelete="RESTRICT")
+    )
+
     __table_args__ = (
         *_org_scope("invoice"),
         UniqueConstraint("organization_id", "number", name="uq_invoice_organization_id_number"),
@@ -365,6 +377,12 @@ class PaymentAllocation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     * The same payment cannot be applied to the same invoice twice — the
       unique constraint refuses it, so a double-click or a duplicated request
       cannot settle an invoice twice over.
+
+    An allocation is **reversed, never deleted**. Deleting one destroyed the
+    only record that a patient's money had once been applied to a bill, and
+    left the journal entry that moved it standing with nothing to explain it
+    (ADR-038). The uniqueness rule therefore applies to live rows only, so the
+    same payment can be re-applied to the same invoice after a reversal.
     """
 
     __tablename__ = "payment_allocation"
@@ -382,13 +400,27 @@ class PaymentAllocation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         PgUUID(as_uuid=True), ForeignKey("app_user.id", ondelete="RESTRICT")
     )
 
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)
+    reversed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("app_user.id", ondelete="RESTRICT")
+    )
+
     __table_args__ = (
         *_org_scope("payment_allocation"),
-        UniqueConstraint(
+        # Live rows only: a reversed allocation is history, and the same
+        # payment may legitimately be applied to the same invoice again.
+        Index(
+            "uq_payment_allocation_live",
             "organization_id",
             "payment_id",
             "invoice_id",
-            name="uq_payment_allocation_payment_invoice",
+            unique=True,
+            postgresql_where=text("reversed_at IS NULL"),
+        ),
+        CheckConstraint(
+            "(reversed_at IS NULL) = (reversal_reason IS NULL)",
+            name="reversal_has_reason",
         ),
         ForeignKeyConstraint(
             ["organization_id", "payment_id"],

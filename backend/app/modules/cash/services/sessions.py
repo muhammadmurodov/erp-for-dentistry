@@ -478,10 +478,58 @@ class CashSessionService:
         try:
             await self._session.flush()
         except IntegrityError as exc:
-            if "uq_cash_movement_payment" not in str(exc.orig):
+            if "uq_cash_movement_payment_kind" not in str(exc.orig):
                 raise
             raise Conflict(
                 "This payment is already recorded in a cash session",
+                details={"payment_id": str(payment_id)},
+            ) from exc
+        return movement
+
+    async def record_payment_refund(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+        payment_id: uuid.UUID,
+        amount: Decimal,
+        description: str | None = None,
+        actor_user_id: uuid.UUID | None = None,
+    ) -> CashMovement:
+        """Record that cash was paid back out of this drawer for a payment.
+
+        The mirror of `record_payment_receipt`, and it exists because the
+        reversal is only half the story: `sales` reverses the ledger entry,
+        but the money physically leaves a till, and until this row exists the
+        drawer goes on expecting it. The end-of-day count then reports a
+        shortage that is not one, and real cash is posted to 9430 as a loss —
+        the same failure as taking cash with no session open, in the other
+        direction (ADR-040).
+
+        **Not necessarily the session that took the money.** A refund given
+        the next day comes out of the drawer that is open now, which is where
+        the cash actually goes from. No ledger entry is made here either: the
+        refund already posted its reversal.
+        """
+        session = await self._require_open(organization_id, session_id)
+        movement = CashMovement(
+            organization_id=organization_id,
+            session_id=session_id,
+            kind=MovementKind.REFUND,
+            amount=quantize(amount, session.currency),
+            description=description,
+            occurred_at=datetime.now(UTC),
+            payment_id=payment_id,
+            recorded_by_user_id=actor_user_id,
+        )
+        self._session.add(movement)
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            if "uq_cash_movement_payment_kind" not in str(exc.orig):
+                raise
+            raise Conflict(
+                "This payment has already been refunded from a cash session",
                 details={"payment_id": str(payment_id)},
             ) from exc
         return movement

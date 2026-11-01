@@ -33,6 +33,10 @@ class InvoiceStatus(StrEnum):
     VOID = "VOID"
     """An issued invoice reversed out. The original stays visible."""
 
+    WRITTEN_OFF = "WRITTEN_OFF"
+    """Issued, unpaid, and given up on. The revenue stands; the receivable
+    does not. Distinct from VOID, which says the sale never happened."""
+
 
 #: Statuses in which an invoice is a real receivable.
 OPEN_INVOICE_STATUSES = frozenset({InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID})
@@ -44,6 +48,7 @@ POSTED_INVOICE_STATUSES = frozenset(
         InvoiceStatus.PARTIALLY_PAID,
         InvoiceStatus.PAID,
         InvoiceStatus.VOID,
+        InvoiceStatus.WRITTEN_OFF,
     }
 )
 

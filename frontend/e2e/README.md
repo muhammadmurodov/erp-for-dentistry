@@ -13,9 +13,10 @@ they can be re-run after a change instead of re-done:
 | --- | --- | --- |
 | `banking.cjs` | statement import, matching, bank accounts | the accountant |
 | `policy.cjs` | accounting policy versions and rules | the owner |
+| `clinic.cjs` | patients, the account, taking a payment | reception, then the cashier |
 
-Between them they have found ten defects, two of them in code that had been
-passing its unit tests since Phase 2.
+Between them they have found thirteen defects, two of them in code that had
+been passing its unit tests since Phase 2.
 
 ## What they check
 
@@ -32,6 +33,27 @@ bring it back — and fails on any of:
   does not report every line as already held;
 - the auditor being offered a control their role does not carry.
 
+`clinic.cjs` drives the clinic as the two people who share the work, because
+that division is what the permissions encode: reception registers a patient
+and may not touch the money, the cashier takes the payment and may not
+register anybody. Between them it registers a patient, provokes the duplicate
+warning with a second one of the same name and birth year, records and bills
+the treatment over the API — the clinical screens do not exist yet — and then
+settles the bill with part cash and part card in one submission. It fails on
+any of:
+
+- the form offering to take more than is owed, or reporting a remaining
+  balance of nothing while it holds more than is owed;
+- the remaining balance being editable, or disagreeing with the bill;
+- cash being available with no drawer open, or unavailable with one;
+- reception being offered a payment control, or an amount field it may type
+  into on a form it cannot submit;
+- the cashier being offered a registration control;
+- the accountant, who may not read a patient, being offered the clinic at all;
+- the ledger disagreeing afterwards: issuing recognises the revenue once,
+  taking the money moves cash and clears the receivable without touching
+  revenue again.
+
 `policy.cjs` drives the policy editor as the owner — the only role that may
 change it — building a version, adding and editing rules, putting it into
 force, discarding a mistaken draft, and checking that an accountant sees the
@@ -39,9 +61,13 @@ same screen with no control that changes it. A step declares the HTTP
 refusals it means to provoke, so the application correctly refusing something
 is not reported as a fault.
 
-Both are re-runnable against the same tenant: `banking.cjs` creates its own
-bank account and seeds its own card payment, and `policy.cjs` takes its
-effective date from whatever is in force and clears any draft left behind.
+All three are re-runnable against the same tenant: `banking.cjs` creates its
+own bank account and seeds its own card payment, `policy.cjs` takes its
+effective date from whatever is in force and clears any draft left behind, and
+`clinic.cjs` creates its own staff, service and patients, then banks what it
+took and closes the drawer it opened — a cash account may only hold what the
+ledger says it holds, so a pass that left money in the till would be refused
+the next time it tried to open one.
 
 Screenshots of every step land in `e2e/shots/`, which is not committed.
 
@@ -68,7 +94,11 @@ cd backend && .venv/bin/python -m app.cli seed-demo
 # 4. The passes themselves.
 node frontend/e2e/banking.cjs
 node frontend/e2e/policy.cjs
+node frontend/e2e/clinic.cjs
 ```
+
+`clinic.cjs` adds the two accounts it needs — a receptionist and a cashier —
+the first time it runs, and signs in as them afterwards.
 
 Each prints `0 problem(s)` when every screen is sound, and otherwise lists
 each problem with the step that produced it.

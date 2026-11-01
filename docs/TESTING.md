@@ -2,7 +2,9 @@
 
 ## Current state
 
-**399 backend tests, all passing.** Verified counts, from `pytest --collect-only -q`:
+**463 backend tests and 25 frontend tests: 461 passed, 2 skipped
+deliberately, 0 failed** (the two skips are explained below). Verified counts,
+from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 
 | Suite | Tests | Covers |
 | --- | --- | --- |
@@ -13,12 +15,15 @@
 | `tests/accounting/test_periods_and_idempotency.py` | 16 | Closed periods, duplicate events, atomicity, **concurrent posting** |
 | `tests/accounting/test_reports_and_policy.py` | 28 | Trial balance, statements, policy versioning and supersession, discarding a draft, workbook-derived default policy |
 | `tests/sales/test_billing.py` | 31 | Invoicing, partial payment, over-allocation, advances, refunds |
+| `tests/sales/test_debt_and_advances.py` | 22 | Patient debt and advances; the two ADR-038 ledger regressions; write-off; concurrent allocation |
+| `tests/clinic/test_payment_validation.py` | 38 | The four payment scenarios, the derived remaining balance, overpayment at service *and* database level, duplicate submission, two concurrency races, and a cash refund moving the drawer and the ledger together (ADR-040) |
 | `tests/sales/test_receivables.py` | 7 | Ageing buckets, cut-off dates, payments reducing the aged amount |
 | `tests/cash/test_sessions.py` | 31 | Sessions, the daily close, discrepancies, deposits, drawer-ledger agreement |
 | `tests/banking/test_reconciliation.py` | 29 | Matching one-to-many and many-to-one, commission, over-matching, double counting |
 | `tests/banking/test_statement_import.py` | 58 | Import tolerance, duplicate suppression, rejected rows, bank accounts |
 | `tests/integration/test_phase1_slice.py` | 9 | The Phase 1 slice end to end over HTTP |
 | `tests/integration/test_phase2_slice.py` | 8 | Chart → calendar → posting → trial balance, over HTTP |
+| `tests/integration/test_phase3c_slice.py` | 4 | Register → treat → bill → issue → settle, over HTTP; the cashier/clinical access split; and a cash refund refused on the sales route but taken at the register (ADR-040) |
 | `tests/integration/test_phase3d_slice.py` | 6 | Import → match → the books, over HTTP, including the upload itself |
 | `tests/security/test_authentication.py` | 19 | Sign-in, lockout, refresh rotation, replay detection |
 | `tests/security/test_authorization.py` | 18 | Least privilege, escalation attempts, SoD enforcement |
@@ -26,13 +31,29 @@
 | `tests/security/test_audit_integrity.py` | 11 | Append-only enforcement, redaction |
 | `tests/test_module_boundaries.py` | 9 | Architecture: no cycles, no reach-ins |
 
-Frontend: TypeScript strict-mode type check and production build run in CI.
-Component tests are not written yet — see *Gaps* below.
+| Frontend suite | Tests | Covers |
+| --- | --- | --- |
+| `src/lib/money.test.ts` | 25 | Exact decimal arithmetic on `bigint` minor units; the four payment scenarios as the panel computes them; amounts a float would get wrong |
+
+**Two tests skip, and say why.** `test_a_written_off_bill_takes_no_payment`
+and `test_a_written_off_debt_owes_nothing_collectible`, both in
+`tests/clinic/test_payment_validation.py`, skip while open question A7 is
+unanswered: the write-off operation has no policy rule, so it fails loudly
+rather than posting to a guessed account. Each skip message carries that
+failure — `No rule for operation 'debt_written_off' in this policy version` —
+so the tests record the state of the question rather than hiding it. Both
+start passing, without being edited, on the day A7 is answered and the rule is
+configured.
+
+Frontend: TypeScript strict-mode type check, ESLint, the `vitest` suite above
+and the production build all run in CI. Component tests are still not written
+— see *Gaps* below.
 
 ## Running them
 
 ```bash
 make test-backend                       # everything
+make test-frontend                      # typecheck, vitest, build
 cd backend && .venv/bin/python -m pytest tests/security -v
 cd backend && .venv/bin/python -m pytest -m integration
 cd backend && .venv/bin/python -m pytest --cov=app --cov-report=term-missing
@@ -256,9 +277,12 @@ implemented the same way: one named test per stated rule.
 
 Stated plainly:
 
-- **No frontend component tests.** Vitest is installed and configured but no
-  tests are written. The forms, permission-dependent rendering and the module
-  placeholder deserve coverage. The type check and build do run in CI.
+- **Frontend coverage is one module deep.** `lib/money.ts` is tested because
+  it does arithmetic on money, and arithmetic is where a float would do real
+  damage. The components around it are not: the payment panel's disabling
+  rules, permission-dependent rendering and the forms deserve coverage, and
+  the type check, the lint and the build are all that currently stand behind
+  them.
 - **No load or performance testing.** Phase 7.
 - **`mypy` is advisory in CI** (`continue-on-error`) until the codebase is
   fully annotated. It is not yet a gate.
@@ -277,7 +301,7 @@ Stated plainly:
 ## Manual browser verification
 
 The interface has been driven end to end in a real Chrome via Playwright and
-each screen inspected, across six passes:
+each screen inspected, across seven passes:
 
 * **Phase 1** — login, a rejected sign-in, the dashboard, a not-built-yet
   module page, the four settings tabs, the role dialog refusing a
@@ -301,6 +325,19 @@ each screen inspected, across six passes:
   and an auditor who may read the queue but is offered no control that
   changes it. Driven by `frontend/e2e/banking.cjs`, which is re-runnable:
   each run creates its own bank account and seeds its own card payment.
+* **Phase 3c** — a patient registered at reception, a second one of the same
+  name and birth year reported as a possible duplicate rather than refused,
+  the account showing what is owed, a payment panel whose remaining balance
+  cannot be typed into, an overpayment refused by the form and then by the
+  service, cash unavailable until a drawer is open and available the moment
+  one is, a bill settled with part cash and part card in one submission, the
+  history showing both halves, all three languages, phone and desktop widths,
+  and the two role boundaries the clinic runs on: reception may register but
+  not take money, the cashier may take money but not register. It checks the
+  ledger afterwards — issuing recognises the revenue, taking the money does
+  not recognise it again. Driven by `frontend/e2e/clinic.cjs`, which is
+  re-runnable: it creates its own staff, service and patients, and banks its
+  takings and closes the drawer it opened.
 * **Accounting policy** — the version in force and its rules, a second
   build from the workbook refused because one is already in force, a new
   version, a rule added and another edited, the draft put into force and the
@@ -311,10 +348,11 @@ each screen inspected, across six passes:
   earlier run left behind.
 
 Each run asserts there are no unexpected console errors or failed requests.
-The Phase 3d script additionally fails on a page wider than its viewport,
-which is the mechanical form of the `<select>` defect Phase 2 found by eye.
+The Phase 3d and 3c scripts additionally fail on a page wider than its
+viewport, which is the mechanical form of the `<select>` defect Phase 2 found
+by eye.
 
-Between them those passes found **nineteen** defects that neither the type
+Between them those passes found **twenty-two** defects that neither the type
 checker, the linter nor the test suite could see, because they were all about
 what the page actually rendered — among them a statement that could be
 imported into the wrong bank account without saying so. They are listed in
@@ -326,6 +364,13 @@ since Phase 2 — an activation that threw a 500 instead of refusing, and a
 draft version that could neither be activated nor removed. Both now have
 tests. Neither was reachable until the screen existed, which is the argument
 for building the screen.
+
+The Phase 3c pass found three, all in what the payment panel showed rather
+than in what it did: a remaining balance of "0" while the form held more than
+was owed, a payment form laid out in full for somebody who may not submit one,
+and the same sentence about the cash drawer printed twice on one screen. The
+first is the one that mattered — the arithmetic underneath was right, and the
+figure on the screen said the opposite.
 
 Three of the Phase 3d defects were in shared components — `Card`,
 `CardHeader`, `PageHeader` — so fixing them straightened the layout of every

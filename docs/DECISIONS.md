@@ -765,3 +765,212 @@ policy that no longer exists.
 version number, effective date and rule count, so the record of what was
 thrown away outlives the thing itself. The policy editor is no longer a dead
 end: a mistaken draft costs one click rather than a database session.
+
+---
+
+## ADR-038 — An allocation is reversed, never deleted
+
+**Context.** `remove_allocation()` deleted the `payment_allocation` row and
+posted nothing. For an allocation created when a payment was recorded that
+was almost right: the payment's own entry carried both sides, so there was no
+separate entry to unwind. For an **advance applied later** it was wrong. That
+path posts an entry of its own — `6310 Dr / 4010 Cr`, a liability becoming a
+settled receivable — and deleting the row left that entry standing with
+nothing to explain it.
+
+Driving the real services and reading the trial balance afterwards showed what
+that costs. After removing such an allocation the subledger reported the
+invoice outstanding at 300 000 while ledger account 4010 reported zero: the
+receivable had become invisible in the accounts. **The trial balance still
+balanced**, which is why no existing test caught it — internal balance is not
+correctness.
+
+Refunding the same payment was worse. `refund_payment()` looked for entries by
+`(source_kind=PAYMENT, source_id=payment, purpose=PAYMENT)`, and the
+advance-application entry is posted with `purpose=ADJUSTMENT` under a
+different source id, so the lookup could not match it. It was left standing
+while the payment entry was reversed, and account 6310 — a liability — ended
+up carrying a **debit balance of 300 000**. A negative liability is not a
+small error; it is a statement that means nothing. The allocation rows had
+been deleted too, so the corruption could not even be traced.
+
+**Decision.** An allocation is marked reversed, not deleted:
+`reversed_at`, `reversed_by_user_id` and a mandatory `reversal_reason`. Any
+entry the allocation posted is reversed with it, in the same transaction.
+`refund_payment` reverses every entry derived from the payment — its own and
+each of its allocations' — before reversing the payment itself, and keeps the
+allocation rows.
+
+Three supporting changes fall out of it:
+
+* The advance-application entry is posted under the **allocation's own id**
+  rather than the `payment:invoice` pair. The pair is not unique over time:
+  once an allocation can be reversed, the same payment may legitimately be
+  applied to the same invoice again, and the idempotency guard would have
+  refused the correction as a duplicate.
+* The uniqueness rule becomes a **partial unique index over live rows**
+  (`WHERE reversed_at IS NULL`), so the same payment can be re-applied after
+  a reversal while a double-click still cannot settle an invoice twice.
+* Every sum that means money counts live rows only. `list_allocations` takes
+  `include_reversed`, and only a history view passes it.
+
+**Why not fix the lookup and keep deleting?** Because the deletion is the part
+that cannot be recovered from. An entry that was not reversed can be reversed
+later; an allocation row that was deleted takes with it the only record that
+a patient's money was once applied to a particular bill. The specification
+asks for history to survive a correction, and a correction that erases its own
+evidence is the thing being guarded against.
+
+**Consequences.** `POST /sales/allocations/{id}/remove` became
+`/reverse` and requires a reason. Two regression tests assert the ledger and
+the subledger agree after a reversal and after a refund, which is the
+assertion neither had before.
+
+---
+
+## ADR-039 — Settling a bill is one operation, and the remaining balance is derived
+
+**Context.** A patient paying 400 000 in cash and 600 000 by card has made one
+decision and expects one receipt. Underneath, the two halves genuinely differ:
+cash goes into a drawer that gets counted, card money waits in transit until
+the bank settles it. Recording them as two independent payments left two
+problems. Each was checked against the remaining balance on its own, so
+600 000 and 600 000 both passed on a bill of 1 000 000; and nothing tied them
+together, so a client retrying after a timeout could take the second half
+twice.
+
+A third problem was the balance itself. The figure a cashier needs — what is
+still owed — existed only as `invoice.total − sum(allocations)` computed at
+various call sites, with no single read model and no statement anywhere about
+who is allowed to decide it.
+
+**Decision.** `SettlementService` in the **clinic** module composes one
+settlement: apply advances, take cash, take card, in that order, inside the
+invoice's row lock, after a single check of the whole submission against the
+remaining balance. Its `view()` is the one read model for the panel —
+treatment total, confirmed payments split by method, advance available,
+remaining balance, and a derived `SettlementStatus`.
+
+It lives in `clinic` because `clinic` is the only module above both `sales`
+and `cash` (ADR-030), so it can reach a receivable and a drawer in one
+transaction without either acquiring a dependency on the other. It owns no
+money: every amount is read from `BillingService` and every entry is posted
+by it. The one table it adds, `settlement_request`, holds a client-supplied
+`request_key` unique per organization, plus the amounts submitted and the ids
+of the payments they produced — so a resubmission is answered with the first
+outcome instead of taking the money again, and a key reused for *different*
+amounts is refused rather than replayed.
+
+**The remaining balance is never an input.** `SettlementRequest` has no field
+for it, at any level of payment: there is nowhere for an edited balance to
+arrive. The frontend renders it into a disabled input computed from the
+invoice and the draft amounts in exact decimal arithmetic on `bigint` minor
+units — never `number`, which is an IEEE-754 double and would lose precision
+on a large som amount. The panel's disabling of fields is a courtesy to the
+cashier, not a control: the backend recomputes everything under the lock.
+
+**Lock order is fixed: invoice first, then payment.** `allocate()` previously
+took them the other way round, which would have deadlocked against a
+composite settlement holding the invoice. Every path now agrees, including the
+database trigger.
+
+**The database enforces it too.** Migration 0003 created
+`assert_allocation_within_limits` as a deferred constraint trigger summing
+every allocation row. ADR-038 then made allocations reversible without
+teaching the guard about it, so the guard counted money that had been taken
+back off — and a legitimate re-application after a reversal would have been
+refused at COMMIT. The tests did not catch it because they run inside a
+transaction that is rolled back, and a deferred trigger never fires without a
+commit. Migration 0008 rewrites it: live rows only, scoped by organization,
+with the same row locks the service takes, and no longer deferred, so the
+error names the statement that caused it.
+
+**Consequences.** `POST /clinic/invoices/{id}/settlement` is the one way to
+take a patient's money, and `GET` on the same path is the one way to ask what
+is owed. Cash is still refused on the generic sales payment route (C-3), so
+there is exactly one path that puts cash in a drawer and in the ledger
+together. Thirty-eight backend cases cover the four payment scenarios,
+advance application, overpayment, duplicate submission and two concurrency
+races; twenty-five frontend cases cover the arithmetic, including amounts a
+float would get wrong; and an HTTP slice runs the whole thing from registering
+a patient to the trial balance.
+
+That slice earned its place immediately. Both settlement routes built their
+response with `vars()`, which raises on a `slots=True` dataclass, so each
+returned a 500 while every service-level test passed. A service that works
+behind a route that does not is not a working system, and only a request
+finds that out.
+
+## ADR-040 — Giving cash back is a drawer movement, not only a ledger reversal
+
+**Context.** `cash_movement` carried a unique constraint on
+`(organization_id, payment_id)`. The rule it was reaching for is right — a
+payment must not be counted into a drawer twice — but it was stated too
+broadly, because it also made it impossible to record that cash had been paid
+back *out* for a payment that already had a receipt row: the second row
+collided with the first.
+
+So refunding a cash payment did half the job. `BillingService.refund_payment`
+reversed every entry the payment had produced, and account 5010 went back to
+zero, but no movement was recorded against the session. The drawer went on
+expecting money that had been handed across the counter. At the end of the
+day the expected balance stood at the full amount, the physical count came up
+short by exactly the refund, and the close posted real cash to 9430 as an
+operating loss — a variance invented by the system, against a till where
+nothing had gone wrong.
+
+It is the same defect as taking cash with no session open (C-3), in the other
+direction, and it was reachable through the only path that handles cash at
+all. It was found by probing the settlement paths against the real services
+and reading the session afterwards, not by a failing test: every test that
+touched a refund asserted the ledger, and the ledger was correct.
+
+**Decision.** The constraint becomes
+`(organization_id, payment_id, kind)` — `uq_cash_movement_payment_kind`,
+migration `0009`. One receipt and one refund per payment, each still
+impossible to duplicate, and the broader rule is not weakened in the
+direction it was written for. Every existing row satisfies the narrower form
+unchanged: a payment with one movement cannot violate a uniqueness rule that
+has only become more specific.
+
+`CashSessionService.record_payment_refund` mirrors `record_payment_receipt`.
+It writes a `MovementKind.REFUND` row, which is in `OUTFLOW_KINDS`, so the
+expected balance falls by the amount — amounts stay positive and the kind
+carries the direction, as everywhere else in this module. It posts
+**no** ledger entry: `sales` has already reversed the original, and posting
+again here would double the reversal.
+
+**The drawer is the one open now, not the one that took the money.** A refund
+given the next day comes out of the till that is open today, because that is
+where the cash physically comes from. Tying it to the original session would
+either refuse the refund or move cash out of a drawer that had been counted
+and closed.
+
+**Two routes, one for each direction, and neither will do the other's work.**
+`POST /cash/sessions/{id}/refunds` gives cash back: it requires
+`sales.refund.approve`, checks the session is open *before* reversing
+anything, and refuses a payment that was not taken in cash.
+`POST /sales/payments/{id}/refund` now refuses a cash payment outright and
+names the cash screen in the message — the mirror of C-3, where cash cannot
+be taken on the generic sales route either. There is exactly one path that
+moves cash in each direction, and both move the drawer and the ledger in the
+same transaction.
+
+**Consequences.** `0009`'s downgrade fails loudly if a refund movement exists,
+rather than dropping the row to satisfy the old constraint: losing the record
+that cash left a till is worse than a migration that refuses to run.
+
+Three cases in `tests/clinic/test_payment_validation.py`
+(`TestRefundingCashKeepsTheDrawerHonest`) cover the drawer and the ledger
+agreeing after a refund, the same refund being refused a second time, and a
+receipt and a refund coexisting for one payment. A fourth,
+`test_a_cash_refund_goes_through_the_register` in the Phase 3c HTTP slice,
+checks the refusal on the sales route and the whole thing end to end over
+HTTP; `test_a_card_refund_still_goes_through_sales` checks that the refusal is
+specific to cash and has not broken the route for everything else.
+
+A unique constraint is a business rule, and this one was a business rule with
+a typo in it. The lesson that generalises: a uniqueness rule over an entity
+and a *reference* usually wants the kind of relationship in the key, because
+the same two things can legitimately be related more than once in different
+ways.

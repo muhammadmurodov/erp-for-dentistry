@@ -8,6 +8,7 @@ import { SettingsPage } from '@/features/settings/SettingsPage'
 import { AccountingPage } from '@/features/accounting/AccountingPage'
 import { SalesPage } from '@/features/sales/SalesPage'
 import { CashPage } from '@/features/cash/CashPage'
+import { ClinicPage } from '@/features/clinic/ClinicPage'
 import { BankingPage } from '@/features/banking/BankingPage'
 import { ModulePlaceholder } from '@/features/modules/ModulePlaceholder'
 import { useI18n } from '@/i18n'
@@ -15,7 +16,6 @@ import { Alert, EmptyState, LoadingState, PageHeader } from '@/components/ui'
 
 /** Modules whose screens are not built yet; each renders an honest placeholder. */
 const PLACEHOLDER_ROUTES = [
-  { path: 'clinic', key: 'clinic', titleKey: 'clinic' },
   { path: 'purchases', key: 'purchases', titleKey: 'purchases' },
   { path: 'inventory', key: 'inventory', titleKey: 'inventory' },
   { path: 'employees', key: 'employees', titleKey: 'employees' },
@@ -66,6 +66,7 @@ export function App() {
             }
           />
         ))}
+        <Route path="clinic/*" element={<ClinicPage />} />
         <Route path="sales/*" element={<SalesPage />} />
         <Route path="cash" element={<CashPage />} />
         <Route path="banking/*" element={<BankingPage />} />

@@ -43,8 +43,8 @@ test: test-backend test-frontend ## Run every test suite
 test-backend: ## Run the backend tests
 	cd $(BACKEND) && .venv/bin/python -m pytest tests -v
 
-test-frontend: ## Type-check and build the frontend
-	cd $(FRONTEND) && npm run typecheck && npm run build
+test-frontend: ## Type-check, unit-test and build the frontend
+	cd $(FRONTEND) && npm run typecheck && npm test && npm run build
 
 lint: ## Lint both sides
 	cd $(BACKEND) && .venv/bin/ruff check app tests alembic

@@ -113,7 +113,10 @@ class TestRedaction:
         await db.flush()
         row = (
             await db.execute(
-                select(AuditLog).where(AuditLog.action == events.USER_UPDATED).limit(1)
+                select(AuditLog).where(
+                    AuditLog.organization_id == org_a.id,
+                    AuditLog.action == events.USER_UPDATED,
+                )
             )
         ).scalar_one()
         assert row.new_values["email"] == "person@example.com"
@@ -133,7 +136,12 @@ class TestRedaction:
         )
         await db.flush()
         row = (
-            await db.execute(select(AuditLog).where(AuditLog.action == events.PAYMENT_RECORDED))
+            await db.execute(
+                select(AuditLog).where(
+                    AuditLog.organization_id == org_a.id,
+                    AuditLog.action == events.PAYMENT_RECORDED,
+                )
+            )
         ).scalar_one()
         assert row.new_values["amount"] == "300000.05"
         assert isinstance(row.new_values["amount"], str)
@@ -148,7 +156,12 @@ class TestRedaction:
         )
         await db.flush()
         row = (
-            await db.execute(select(AuditLog).where(AuditLog.action == events.USER_UPDATED))
+            await db.execute(
+                select(AuditLog).where(
+                    AuditLog.organization_id == org_a.id,
+                    AuditLog.action == events.USER_UPDATED,
+                )
+            )
         ).scalar_one()
         assert len(row.new_values["note"]) < 5000
 

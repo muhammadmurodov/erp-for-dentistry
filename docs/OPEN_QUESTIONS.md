@@ -130,6 +130,26 @@ may not reconcile.
 
 ---
 
+### A7 — Which account takes a written-off patient debt? · Blocking the write-off posting rule
+**Needed from:** accountant
+
+A debt write-off is now a distinct operation (ADR-038's sibling: voiding an
+invoice reverses the revenue, writing off a debt does not). The receivable is
+cleared against an expense, and the revenue stands in the period it was
+earned.
+
+The proposal is `9430 Dr / 4010 Cr` — other operating expenses — by analogy
+with the cash-shortage treatment already in the policy. That is a proposal,
+not a decision.
+
+**Asked as:** which account should carry an uncollectable patient debt, and is
+a provision required before the write-off, or is the direct write-off
+acceptable at this scale? Until this is answered the operation is registered
+and permissioned but **has no policy rule**, so attempting a write-off fails
+loudly rather than posting to a guessed account. A test asserts that failure
+rather than skipping it quietly.
+
+---
 ## B. Cash and banking
 
 ### B1 — Who may hold the cash register, and is there more than one? · Blocking Phase 3
@@ -226,6 +246,45 @@ at all? This decides whether Phase 3 needs an import path.
 
 ---
 
+### C3 — What does the `I`/`II` column in the paper register mean? · Non-blocking
+**Needed from:** owner or the registrar
+
+The handwritten register photographed on 30 October 2026 has a third column
+whose header is written small and rotated about 45°, and does not resolve at
+the resolution supplied. Its *values* are legible and are Roman **I** or
+**II** throughout.
+
+The obvious reading is first visit versus repeat visit, which would match
+ordinary medical register practice — but that is a hypothesis about an
+illegible header, not a reading of it, and nothing has been built on it.
+
+**Asked as:** what is that column, and does it need recording? If it is
+first-versus-repeat, the system can derive it from the encounter history
+instead of asking anyone to type it. Meanwhile `encounter` carries no such
+field.
+
+---
+
+### C4 — What do the amounts and ticks in the treatment column mean? · Blocking any use of the register as a financial record
+**Needed from:** owner
+
+A minority of rows carry a figure in the treatment column, written as
+`200 —`, `400 —`, `600 —`, alongside at least one longer figure. Uzbek
+practice commonly writes thousands this way, which would make `600` mean
+600 000 UZS. Some rows carry a tick instead.
+
+Three things are unresolved and they compound: whether the figures are
+thousands; whether they mean charged, paid or quoted; and whether a tick means
+paid, completed, or checked by the owner.
+
+**Asked as:** are those figures thousands of so'm, and do they record what was
+charged or what was received? What does the tick mean? Until this is answered
+**the register is treated as a clinical log with no financial content** — no
+amount from it has been imported, and the financial record is taken from the
+workbook alone. If the figures turn out to be payments, there is a second
+source of truth for money that has never been reconciled against the first.
+
+---
 ## S. Sales and receivables
 
 ### S1 — Are partial or deferred patient payments accepted? · Blocking policy configuration
@@ -254,6 +313,24 @@ treatment already started?
 
 ---
 
+### S3 — May an invoice be issued before the patient pays? · Non-blocking
+**Needed from:** owner
+
+The system recognises revenue when an invoice is issued, and treats the unpaid
+remainder as a receivable — the patient's qarzdorlik. That is the correct
+treatment if the clinic bills and then collects.
+
+But the register suggests the clinic may simply take money at the point of
+treatment, in which case a receivable would normally never exist and the debt
+case would be the exception rather than the rule.
+
+**Asked as:** does the clinic ever hand a patient a bill to pay later, or is
+payment always taken at the visit? This does not change the accounting — both
+are already supported — but it decides which screen the day's work starts
+from, and whether an invoice should be issued and settled in one action by
+default.
+
+---
 ## P. Employees and payroll
 
 ### P1 — Uzbek wording for 12 statutory timesheet codes · Non-blocking

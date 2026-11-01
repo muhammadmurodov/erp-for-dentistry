@@ -218,9 +218,19 @@ class CashMovement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             ondelete="RESTRICT",
             name="fk_cash_movement_payment",
         ),
-        # One movement per payment: a payment cannot be counted into the
-        # drawer twice, whatever the caller does.
-        UniqueConstraint("organization_id", "payment_id", name="uq_cash_movement_payment"),
+        # One movement per payment **per direction**: a payment cannot be
+        # counted into the drawer twice, and cannot be paid back out of it
+        # twice, whatever the caller does.
+        #
+        # This was `(organization_id, payment_id)` alone, which made a refund
+        # movement for a payment already receipted impossible to record — so
+        # refunding a cash payment reversed the ledger and left the drawer
+        # still expecting the money. The day's count then reported a shortage
+        # that was not one, and real cash was written off to 9430 as a loss
+        # (ADR-040).
+        UniqueConstraint(
+            "organization_id", "payment_id", "kind", name="uq_cash_movement_payment_kind"
+        ),
         CheckConstraint("amount > 0", name="amount_positive"),
         CheckConstraint(
             "kind <> 'DEPOSIT' OR deposit_route IS NOT NULL",

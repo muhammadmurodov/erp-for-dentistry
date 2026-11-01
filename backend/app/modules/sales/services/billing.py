@@ -23,6 +23,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import Conflict, NotFound, ValidationFailed
@@ -70,6 +71,11 @@ OPERATION_ADVANCE_BY_METHOD = {
 }
 #: Posted when an advance is later applied to an invoice.
 OPERATION_ADVANCE_APPLIED = "advance_applied_to_invoice"
+#: Clearing a debt the clinic has given up collecting. Deliberately absent
+#: from the default policy: which account absorbs a bad patient debt is
+#: `OPEN_QUESTIONS.md` A7, and until an accountant answers it the write-off
+#: fails loudly rather than posting to a guessed account (ADR-039).
+OPERATION_DEBT_WRITTEN_OFF = "debt_written_off"
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,11 +89,21 @@ class InvoiceLineInput:
 
 @dataclass(frozen=True, slots=True)
 class CustomerBalance:
+    """What a patient owes and what they have on account.
+
+    `invoiced` counts everything genuinely billed, written-off debts
+    included — the revenue was earned. `outstanding` is what is still
+    collectable, so a written-off debt drops out of it. Keeping both means
+    the screen can show "billed 2 000 000, of which 300 000 written off"
+    rather than quietly shrinking the patient's history.
+    """
+
     customer_id: uuid.UUID
     invoiced: Decimal
     paid: Decimal
     outstanding: Decimal
     unapplied_credit: Decimal
+    written_off: Decimal = Decimal("0")
 
 
 class BillingService:
@@ -357,6 +373,88 @@ class BillingService:
         )
         return invoice
 
+    async def write_off_debt(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        invoice_id: uuid.UUID,
+        reason: str,
+        written_off_on: date | None = None,
+        actor_user_id: uuid.UUID | None = None,
+    ) -> Invoice:
+        """Give up on collecting what is still outstanding on an invoice.
+
+        A write-off is **not** a void. Voiding says the invoice should never
+        have existed and reverses the revenue, restating a period that may
+        already have been reported. A write-off says the revenue was earned
+        and the money will not arrive: the receivable goes, the revenue
+        stays, and the loss lands in the period the decision was taken.
+
+        Only the outstanding part is written off, so a part-paid invoice
+        keeps the payments that were made.
+        """
+        if not reason or not reason.strip():
+            raise ValidationFailed("A write-off requires a reason")
+
+        invoice = await self._locked_invoice(organization_id, invoice_id)
+        if invoice.status not in OPEN_INVOICE_STATUSES:
+            raise Conflict(
+                f"Invoice {invoice.number} is {invoice.status.value.lower()} "
+                "and has no debt to write off",
+                details={"status": invoice.status.value},
+            )
+        if invoice.written_off_at is not None:
+            raise Conflict(f"Invoice {invoice.number} has already been written off")
+
+        outstanding = await self.outstanding(organization_id=organization_id, invoice_id=invoice_id)
+        if outstanding <= ZERO:
+            raise Conflict(f"Invoice {invoice.number} has nothing outstanding to write off")
+
+        on = written_off_on or date.today()
+        policy = await self._policy_for(organization_id, on)
+        rule = await self._posting.resolve_policy_rule(
+            organization_id=organization_id,
+            policy_id=policy.id,
+            operation_code=OPERATION_DEBT_WRITTEN_OFF,
+        )
+        await self._posting.post(
+            organization_id=organization_id,
+            request=PostingRequest(
+                entry_date=on,
+                description=f"Debt written off: invoice {invoice.number}",
+                source_kind=SourceKind.INVOICE,
+                source_id=str(invoice.id),
+                purpose=PostingPurpose.ADJUSTMENT,
+                currency=invoice.currency,
+                operation_code=OPERATION_DEBT_WRITTEN_OFF,
+                policy_id=policy.id,
+                lines=[
+                    PostingLine(account_id=rule.debit_account_id, debit=outstanding),
+                    PostingLine(account_id=rule.credit_account_id, credit=outstanding),
+                ],
+            ),
+            actor_user_id=actor_user_id,
+        )
+
+        invoice.written_off_at = datetime.now(UTC)
+        invoice.write_off_reason = reason.strip()
+        invoice.written_off_by_user_id = actor_user_id
+        invoice.status = InvoiceStatus.WRITTEN_OFF
+        await self._session.flush()
+
+        self._audit.record(
+            events.DEBT_WRITTEN_OFF,
+            organization_id=organization_id,
+            target_type="invoice",
+            target_id=invoice.id,
+            target_label=invoice.number,
+            reason=reason.strip(),
+            business_event=f"invoice:{invoice.id}",
+            old_values={"outstanding": outstanding},
+            new_values={"written_off": True, "amount": outstanding},
+        )
+        return invoice
+
     # ------------------------------------------------------------ payments
 
     async def record_payment(
@@ -527,12 +625,24 @@ class BillingService:
         if payment.status is PaymentStatus.REFUNDED:
             raise Conflict(f"Payment {payment.number} has already been refunded")
 
+        # Unapply first, and reverse each application's own entry. Reversing
+        # only the payment entry left the advance-application entries
+        # standing: account 6310 ended up with a debit balance — a negative
+        # liability — while the invoice reopened unpaid (ADR-038).
         allocations = await self.list_allocations(
             organization_id=organization_id, payment_id=payment_id
         )
         touched = [a.invoice_id for a in allocations]
         for allocation in allocations:
-            await self._session.delete(allocation)
+            await self._reverse_allocation_posting(
+                organization_id=organization_id,
+                allocation_id=allocation.id,
+                reason=f"Payment {payment.number} refunded: {reason.strip()}",
+                actor_user_id=actor_user_id,
+            )
+            allocation.reversed_at = datetime.now(UTC)
+            allocation.reversal_reason = f"Payment {payment.number} refunded"
+            allocation.reversed_by_user_id = actor_user_id
         await self._session.flush()
 
         entries = await self._posting.find_by_source(
@@ -588,9 +698,15 @@ class BillingService:
         two concurrent allocations could each read the same remaining balance
         and both succeed — the scenario the specification calls out, where
         two cashiers apply the same payment at once.
+
+        **The invoice is locked first, then the payment**, and every other
+        path that touches an allocation takes them in that order too: the
+        composite settlement above this module, and the database trigger that
+        backs the rule up. One order, consistently, is what makes a deadlock
+        between two settlements impossible rather than merely unlikely.
         """
-        payment = await self._locked_payment(organization_id, payment_id)
         invoice = await self._locked_invoice(organization_id, invoice_id)
+        payment = await self._locked_payment(organization_id, payment_id)
 
         if payment.status is PaymentStatus.REFUNDED:
             raise Conflict(f"Payment {payment.number} has been refunded")
@@ -641,7 +757,29 @@ class BillingService:
             allocated_by_user_id=actor_user_id,
         )
         self._session.add(allocation)
-        await self._session.flush()
+        # The checks above are the readable guard; these are the ones that
+        # hold when two transactions interleave. Both are enforced by the
+        # database — a unique index over live rows, and a trigger that
+        # re-sums under the same row locks this method already holds — so a
+        # duplicated request cannot settle an invoice twice even if it
+        # reaches the tables by some other route (ADR-039).
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            detail = str(exc.orig)
+            if "uq_payment_allocation_live" in detail:
+                raise Conflict(
+                    f"Payment {payment.number} is already applied to invoice "
+                    f"{invoice.number}. Reverse that allocation before applying it again.",
+                    details={"payment_id": str(payment_id), "invoice_id": str(invoice_id)},
+                ) from exc
+            if "over-allocated" in detail:
+                raise Conflict(
+                    f"Invoice {invoice.number} is already settled in full. "
+                    "Another payment was applied to it a moment ago.",
+                    details={"invoice_id": str(invoice_id)},
+                ) from exc
+            raise
 
         if post:
             # Applying an existing advance converts a liability into revenue
@@ -659,7 +797,12 @@ class BillingService:
                     entry_date=date.today(),
                     description=(f"Advance from {payment.number} applied to {invoice.number}"),
                     source_kind=SourceKind.PAYMENT,
-                    source_id=f"{payment.id}:{invoice.id}",
+                    # The allocation's own id, not the payment/invoice pair.
+                    # The pair is not unique over time: once an allocation can
+                    # be reversed, the same payment may be applied to the same
+                    # invoice again, and the idempotency guard would refuse the
+                    # correction as a duplicate (ADR-038).
+                    source_id=str(allocation.id),
                     purpose=PostingPurpose.ADJUSTMENT,
                     currency=invoice.currency,
                     operation_code=OPERATION_ADVANCE_APPLIED,
@@ -673,7 +816,7 @@ class BillingService:
             )
 
         self._audit.record(
-            "sales.payment.allocated",
+            events.PAYMENT_ALLOCATED,
             organization_id=organization_id,
             target_type="payment_allocation",
             target_id=allocation.id,
@@ -717,16 +860,25 @@ class BillingService:
             remaining = quantize(remaining - take, invoice.currency)
         return plan
 
-    async def remove_allocation(
+    async def reverse_allocation(
         self,
         *,
         organization_id: uuid.UUID,
         allocation_id: uuid.UUID,
         reason: str,
         actor_user_id: uuid.UUID | None = None,
-    ) -> None:
+    ) -> PaymentAllocation:
+        """Unapply a payment from an invoice, in the subledger and the ledger.
+
+        This used to delete the row and post nothing. When the allocation was
+        an advance being applied — the one case that posts an entry of its
+        own — that left `6310 Dr / 4010 Cr` standing with the allocation it
+        described gone: the invoice reopened in the subledger while the ledger
+        went on reporting the receivable as settled. The trial balance still
+        balanced, which is exactly why it went unnoticed (ADR-038).
+        """
         if not reason or not reason.strip():
-            raise ValidationFailed("Removing an allocation requires a reason")
+            raise ValidationFailed("Reversing an allocation requires a reason")
         stmt = select(PaymentAllocation).where(
             PaymentAllocation.organization_id == organization_id,
             PaymentAllocation.id == allocation_id,
@@ -734,19 +886,65 @@ class BillingService:
         allocation = (await self._session.execute(stmt)).scalar_one_or_none()
         if allocation is None:
             raise NotFound("Allocation not found")
+        if allocation.reversed_at is not None:
+            raise Conflict("This allocation has already been reversed")
 
         invoice_id = allocation.invoice_id
+        await self._reverse_allocation_posting(
+            organization_id=organization_id,
+            allocation_id=allocation.id,
+            reason=reason.strip(),
+            actor_user_id=actor_user_id,
+        )
+
+        allocation.reversed_at = datetime.now(UTC)
+        allocation.reversal_reason = reason.strip()
+        allocation.reversed_by_user_id = actor_user_id
+        await self._session.flush()
+
         self._audit.record(
-            "sales.payment.allocation_removed",
+            events.ALLOCATION_REVERSED,
             organization_id=organization_id,
             target_type="payment_allocation",
             target_id=allocation.id,
             reason=reason.strip(),
+            business_event=f"payment:{allocation.payment_id}",
             old_values={"amount": allocation.amount, "invoice_id": str(invoice_id)},
+            new_values={"reversed": True},
         )
-        await self._session.delete(allocation)
-        await self._session.flush()
         await self._refresh_invoice_statuses(organization_id, [invoice_id])
+        return allocation
+
+    async def _reverse_allocation_posting(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        allocation_id: uuid.UUID,
+        reason: str,
+        actor_user_id: uuid.UUID | None,
+    ) -> None:
+        """Reverse the entry an advance application posted, if there was one.
+
+        An allocation made at the moment the payment was recorded posts
+        nothing of its own — the payment entry already carried both sides — so
+        there is usually nothing here to reverse. An advance applied later
+        does post, under the allocation's own id.
+        """
+        entries = await self._posting.find_by_source(
+            organization_id=organization_id,
+            source_kind=SourceKind.PAYMENT,
+            source_id=str(allocation_id),
+            purpose=PostingPurpose.ADJUSTMENT,
+        )
+        for entry in entries:
+            if entry.reversed_by_entry_id is None:
+                await self._posting.reverse(
+                    organization_id=organization_id,
+                    entry_id=entry.id,
+                    reason=reason,
+                    actor_user_id=actor_user_id,
+                    reversal_date=date.today(),
+                )
 
     # --------------------------------------------------------------- reads
 
@@ -792,6 +990,102 @@ class BillingService:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_invoices(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        customer_id: uuid.UUID | None = None,
+        statuses: frozenset[InvoiceStatus] | None = None,
+        limit: int = 200,
+    ) -> list[Invoice]:
+        """A customer's bills, newest first.
+
+        Here rather than queried directly by a caller, so that a module above
+        this one — the clinic's patient page, for instance — reads invoices
+        through the service that owns them instead of acquiring its own
+        opinion about which statuses count.
+        """
+        stmt = select(Invoice).where(Invoice.organization_id == organization_id)
+        if customer_id is not None:
+            stmt = stmt.where(Invoice.customer_id == customer_id)
+        if statuses is not None:
+            stmt = stmt.where(Invoice.status.in_(list(statuses)))
+        stmt = stmt.order_by(Invoice.issue_date.desc(), Invoice.number.desc()).limit(limit)
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def lock_invoice(self, *, organization_id: uuid.UUID, invoice_id: uuid.UUID) -> Invoice:
+        """Take the invoice's row lock and return it.
+
+        The serialization point for settling one invoice. A caller that
+        composes several payments into one settlement — cash, card and an
+        applied advance in a single submission — must hold this lock for the
+        whole of it, or two cashiers reading the same remaining balance will
+        each believe their payment fits (ADR-039).
+
+        Public because the composition happens above this module: `sales`
+        cannot see a cash drawer. Everything *inside* the lock still goes
+        through this service's own methods.
+        """
+        return await self._locked_invoice(organization_id, invoice_id)
+
+    async def unapplied_payments(
+        self, *, organization_id: uuid.UUID, customer_id: uuid.UUID
+    ) -> list[tuple[Payment, Decimal]]:
+        """The customer's payments that still have money spare, oldest first.
+
+        Each pair is a payment and how much of it is unapplied — an advance
+        looking for an invoice. Oldest first so the money a patient left
+        longest ago is used first, which is what they expect and what keeps
+        the liability from ageing.
+        """
+        stmt = (
+            select(Payment)
+            .where(
+                Payment.organization_id == organization_id,
+                Payment.customer_id == customer_id,
+                Payment.status == PaymentStatus.RECORDED,
+            )
+            .order_by(Payment.received_on, Payment.number)
+        )
+        spare: list[tuple[Payment, Decimal]] = []
+        for payment in (await self._session.execute(stmt)).scalars():
+            applied = await self.allocated_from_payment(
+                organization_id=organization_id, payment_id=payment.id
+            )
+            available = quantize(payment.amount - applied, payment.currency)
+            if available > ZERO:
+                spare.append((payment, available))
+        return spare
+
+    async def allocated_to_invoice_by_method(
+        self, *, organization_id: uuid.UUID, invoice_id: uuid.UUID
+    ) -> dict[PaymentMethod, Decimal]:
+        """Live allocations on this invoice, split by how the money arrived.
+
+        The patient-facing panel shows what was paid in cash and what by
+        card. Both are the same receivable settlement in the ledger, so this
+        is a presentation question — but it is answered from the allocation
+        rows, never from a figure anybody typed.
+        """
+        stmt = (
+            select(Payment.method, func.coalesce(func.sum(PaymentAllocation.amount), 0))
+            .select_from(PaymentAllocation)
+            .join(
+                Payment,
+                (Payment.id == PaymentAllocation.payment_id)
+                & (Payment.organization_id == PaymentAllocation.organization_id),
+            )
+            .where(
+                PaymentAllocation.organization_id == organization_id,
+                PaymentAllocation.invoice_id == invoice_id,
+                PaymentAllocation.reversed_at.is_(None),
+                Payment.status == PaymentStatus.RECORDED,
+            )
+            .group_by(Payment.method)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {method: quantize(Decimal(total or 0)) for method, total in rows}
+
     async def _locked_invoice(self, organization_id: uuid.UUID, invoice_id: uuid.UUID) -> Invoice:
         stmt = (
             select(Invoice)
@@ -833,12 +1127,20 @@ class BillingService:
         organization_id: uuid.UUID,
         payment_id: uuid.UUID | None = None,
         invoice_id: uuid.UUID | None = None,
+        include_reversed: bool = False,
     ) -> list[PaymentAllocation]:
+        """Allocations, live ones only unless the history is asked for.
+
+        Every caller that sums money wants live rows. Only a history view
+        wants the reversed ones, and it has to say so.
+        """
         stmt = select(PaymentAllocation).where(PaymentAllocation.organization_id == organization_id)
         if payment_id is not None:
             stmt = stmt.where(PaymentAllocation.payment_id == payment_id)
         if invoice_id is not None:
             stmt = stmt.where(PaymentAllocation.invoice_id == invoice_id)
+        if not include_reversed:
+            stmt = stmt.where(PaymentAllocation.reversed_at.is_(None))
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def allocated_to_invoice(
@@ -847,6 +1149,7 @@ class BillingService:
         stmt = select(func.coalesce(func.sum(PaymentAllocation.amount), 0)).where(
             PaymentAllocation.organization_id == organization_id,
             PaymentAllocation.invoice_id == invoice_id,
+            PaymentAllocation.reversed_at.is_(None),
         )
         return Decimal((await self._session.execute(stmt)).scalar_one() or 0)
 
@@ -856,6 +1159,7 @@ class BillingService:
         stmt = select(func.coalesce(func.sum(PaymentAllocation.amount), 0)).where(
             PaymentAllocation.organization_id == organization_id,
             PaymentAllocation.payment_id == payment_id,
+            PaymentAllocation.reversed_at.is_(None),
         )
         return Decimal((await self._session.execute(stmt)).scalar_one() or 0)
 
@@ -881,6 +1185,7 @@ class BillingService:
                                 InvoiceStatus.ISSUED,
                                 InvoiceStatus.PARTIALLY_PAID,
                                 InvoiceStatus.PAID,
+                                InvoiceStatus.WRITTEN_OFF,
                             ]
                         ),
                     )
@@ -912,6 +1217,7 @@ class BillingService:
                     )
                     .where(
                         PaymentAllocation.organization_id == organization_id,
+                        PaymentAllocation.reversed_at.is_(None),
                         Payment.customer_id == customer_id,
                         Payment.status == PaymentStatus.RECORDED,
                     )
@@ -919,12 +1225,48 @@ class BillingService:
             ).scalar_one()
             or 0
         )
+        written_off = Decimal(
+            (
+                await self._session.execute(
+                    select(func.coalesce(func.sum(Invoice.total), 0)).where(
+                        Invoice.organization_id == organization_id,
+                        Invoice.customer_id == customer_id,
+                        Invoice.status == InvoiceStatus.WRITTEN_OFF,
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
+        written_off_allocated = Decimal(
+            (
+                await self._session.execute(
+                    select(func.coalesce(func.sum(PaymentAllocation.amount), 0))
+                    .select_from(PaymentAllocation)
+                    .join(
+                        Invoice,
+                        (Invoice.id == PaymentAllocation.invoice_id)
+                        & (Invoice.organization_id == PaymentAllocation.organization_id),
+                    )
+                    .where(
+                        PaymentAllocation.organization_id == organization_id,
+                        PaymentAllocation.reversed_at.is_(None),
+                        Invoice.customer_id == customer_id,
+                        Invoice.status == InvoiceStatus.WRITTEN_OFF,
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
+        # Only the part actually given up on leaves the outstanding figure;
+        # anything the patient did pay towards it already left via `allocated`.
+        forgiven = written_off - written_off_allocated
         return CustomerBalance(
             customer_id=customer_id,
             invoiced=quantize(invoiced),
             paid=quantize(paid),
-            outstanding=quantize(invoiced - allocated),
+            outstanding=quantize(invoiced - allocated - forgiven),
             unapplied_credit=quantize(paid - allocated),
+            written_off=quantize(forgiven),
         )
 
     # ------------------------------------------------------------ internals
@@ -952,7 +1294,12 @@ class BillingService:
         """
         for invoice_id in {i for i in invoice_ids if i is not None}:
             invoice = await self.get_invoice(organization_id=organization_id, invoice_id=invoice_id)
-            if invoice.status in (InvoiceStatus.DRAFT, InvoiceStatus.VOID, InvoiceStatus.CANCELLED):
+            if invoice.status in (
+                InvoiceStatus.DRAFT,
+                InvoiceStatus.VOID,
+                InvoiceStatus.CANCELLED,
+                InvoiceStatus.WRITTEN_OFF,
+            ):
                 continue
             allocated = await self.allocated_to_invoice(
                 organization_id=organization_id, invoice_id=invoice_id

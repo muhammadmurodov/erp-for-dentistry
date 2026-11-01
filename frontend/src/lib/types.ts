@@ -309,6 +309,8 @@ export type InvoiceStatus =
   | 'PAID'
   | 'CANCELLED'
   | 'VOID'
+  /** Given up on. The revenue stands; the receivable does not. */
+  | 'WRITTEN_OFF'
 
 export type PaymentMethod = 'CASH' | 'CARD' | 'BANK_TRANSFER'
 export type PaymentStatus = 'RECORDED' | 'REFUNDED'
@@ -643,4 +645,127 @@ export interface MatchCandidate {
   amount: string
   already_matched: string
   outstanding: string
+}
+
+// --- clinic -----------------------------------------------------------------
+
+export interface PatientSummary {
+  id: string
+  code: string
+  display_name: string
+  family_name: string
+  given_name: string
+  patronymic: string | null
+  birth_year: number | null
+  phone: string | null
+  address: string | null
+  registered_on: string
+  assigned_dentist_user_id: string | null
+  customer_id: string | null
+  is_active: boolean
+  merged_into_patient_id: string | null
+}
+
+export interface DuplicateCandidate {
+  patient_id: string
+  code: string
+  display_name: string
+  birth_year: number | null
+  phone: string | null
+  reason: string
+}
+
+export interface PatientRegistered {
+  patient: PatientSummary
+  duplicate_candidates: DuplicateCandidate[]
+}
+
+export interface PatientBalance {
+  customer_id: string | null
+  invoiced: string
+  paid: string
+  /** The qarzdorlik: billed, not paid, not written off. */
+  outstanding: string
+  /** Oldindan to'lov — money received that no invoice has claimed yet. */
+  advances_available: string
+  written_off: string
+}
+
+/**
+ * How far a bill has been paid. Derived by the backend from the invoice total
+ * and its live allocations, never stored — so it cannot disagree with the
+ * payments behind it.
+ */
+export type SettlementStatus =
+  | 'UNPAID'
+  | 'PARTIALLY_PAID'
+  | 'FULLY_PAID'
+  | 'WRITTEN_OFF'
+  | 'NOT_PAYABLE'
+
+export interface PatientInvoiceRow {
+  invoice_id: string
+  number: string
+  issue_date: string
+  status: InvoiceStatus
+  settlement_status: SettlementStatus
+  total: string
+  paid: string
+  remaining: string
+  currency: string
+}
+
+export interface PatientDetail {
+  patient: PatientSummary
+  balance: PatientBalance
+  invoices: PatientInvoiceRow[]
+  billable_items: number
+  open_duplicate_reviews: number
+}
+
+/**
+ * The payment panel's state, all of it computed by the backend.
+ *
+ * `remaining` is displayed and never sent back: the settlement request has no
+ * field for it.
+ */
+export interface SettlementView {
+  invoice_id: string
+  invoice_number: string
+  customer_id: string
+  currency: string
+  invoice_status: InvoiceStatus
+  status: SettlementStatus
+  treatment_total: string
+  paid: string
+  paid_cash: string
+  paid_card: string
+  paid_other: string
+  remaining: string
+  advances_available: string
+  max_payable: string
+  written_off: string
+  accepts_payment: boolean
+  /** Null means no drawer is open, so cash cannot be taken here. */
+  open_cash_session_id: string | null
+}
+
+export interface SettlementResult {
+  view: SettlementView
+  applied_advances: string
+  cash_payment_id: string | null
+  card_payment_id: string | null
+  /** True when the submission had already been carried out; money moved once. */
+  replayed: boolean
+}
+
+export interface SettlementHistoryRow {
+  allocation_id: string
+  payment_id: string
+  payment_number: string
+  method: PaymentMethod
+  amount: string
+  received_on: string
+  reversed_at: string | null
+  reversal_reason: string | null
 }
