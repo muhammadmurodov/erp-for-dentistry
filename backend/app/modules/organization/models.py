@@ -8,9 +8,18 @@ periods, policies, employees and documents. Currency is global reference data
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Date, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -69,8 +78,32 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    #: Declared by the owner: this organization has too few people to put a
+    #: different person on each side of an approval control. A clinic run by
+    #: two or three family members is the case it exists for.
+    #:
+    #: It does not grant anybody a permission. It removes only the requirement
+    #: that an approver be someone *other* than the person who did the work —
+    #: the one condition a three-person clinic cannot meet. Every act that
+    #: relies on it is marked `self_approved` in the audit trail, so the
+    #: compensating control is a readable record rather than a second signature
+    #: that was never going to exist (ADR-041).
+    duties_cannot_be_separated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    #: When the declaration was last changed. *Who* changed it is in the audit
+    #: trail under `organization.duties.declared`, which is the authority: a
+    #: column can be updated, an audit row cannot.
+    duties_declared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     __table_args__ = (
         CheckConstraint("char_length(code) >= 2", name="code_min_length"),
+        # A declaration without a date would leave nothing to reconcile the
+        # audit trail against.
+        CheckConstraint(
+            "duties_cannot_be_separated IS FALSE OR duties_declared_at IS NOT NULL",
+            name="duty_declaration_has_a_date",
+        ),
         CheckConstraint("base_currency = upper(base_currency)", name="base_currency_uppercase"),
         CheckConstraint(
             "tax_number IS NULL OR tax_number ~ '^[0-9]{9,14}$'",

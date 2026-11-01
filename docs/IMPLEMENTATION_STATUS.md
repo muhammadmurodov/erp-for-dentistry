@@ -11,11 +11,11 @@ asserts nothing beyond Phase 1 reports itself as `available`.
 Every figure below was produced by running the command shown, not estimated.
 
 ```
-backend:  461 passed, 2 skipped in 102.91s   .venv/bin/python -m pytest tests
+backend:  522 passed, 2 skipped in 122.31s   .venv/bin/python -m pytest tests
 lint:     All checks passed!       .venv/bin/ruff check app tests alembic
 schema:   No new upgrade operations detected.   alembic check
 migrate:  downgrade base -> upgrade head: clean (every test run)
-frontend: 25 passed (25)           npm test
+frontend: 43 passed (43)           npm test
           built in 1.15s           npm run build
           0 problems               npm run lint
           0 errors                 npm run typecheck
@@ -28,7 +28,8 @@ ui e2e:   Phase 1: 12 screens driven in Chrome, each inspected
           Phase 3d: 18 banking steps driven in Chrome, 0 console errors
           Phase 3c: 31 clinic steps driven in Chrome, 0 console errors
           Policy:   10 policy steps driven in Chrome, 0 console errors
-                    — all three kept as scripts under `frontend/e2e/`,
+          Small clinic: 28 steps driven in Chrome, 0 console errors
+                    — all four kept as scripts under `frontend/e2e/`,
                       re-runnable, 0 problems reported on a repeat run
 sql e2e:  12 database invariants verified by raw SQL with the service bypassed
           Phase 3d: 9 more, same method
@@ -69,7 +70,7 @@ marked as such with a list of what is and is not built.
 
 ### Endpoints
 
-17 routes. All verified live.
+18 routes. All verified live.
 
 ```
 GET    /health/live                        GET    /api/v1/platform/modules
@@ -81,7 +82,7 @@ GET    /api/v1/auth/me                     GET    /api/v1/users
 POST   /api/v1/auth/change-password        POST   /api/v1/users
 POST   /api/v1/auth/switch-organization    PUT    /api/v1/users/{id}/roles
 GET    /api/v1/audit/logs                  POST   /api/v1/users/{id}/deactivate
-GET    /api/v1/roles
+GET    /api/v1/roles                       PUT    /api/v1/organization/duty-separation
 ```
 
 ### Database-level guarantees, verified
@@ -318,7 +319,7 @@ status), encounters (open, complete, list for a patient), treatment items
 (billable items, draft an invoice), and settlement (the remaining balance,
 take a payment, payment history).
 
-**112 routes in the API overall** — 110 under `/api/v1`, plus the two
+**113 routes in the API overall** — 111 under `/api/v1`, plus the two
 health checks. Counted from the generated OpenAPI document, one per
 path-and-method.
 
@@ -379,6 +380,66 @@ to `(organization_id, payment_id, kind)`, cash is refunded from an open session
 through `POST /cash/sessions/{id}/refunds`, and the generic sales refund route
 now refuses a cash payment and says where to go (ADR-040).
 
+## Fitted to a clinic of three · Complete
+
+The clinic this is built for is run by two or three members of one family.
+Two things were adjusted for that, and nothing else was: the system was not
+redesigned for a different business.
+
+**An organization may declare that it cannot separate duties** — the owner's
+setting, with a mandatory reason, audited both ways (ADR-041). Before it, a
+cashier who counted the till and found it short **could not close the session
+at all**, because closing with a discrepancy needs an approval permission the
+cashier role does not hold; and a cashier could not give back a payment they
+had just taken in error. Neither refusal produces a second person. It
+produces an open drawer overnight and, eventually, three people sharing the
+owner's login — which does not weaken the audit trail so much as empty it.
+
+The declaration grants nobody a permission. It removes only the requirement
+that an approver be a **different** person, and every act relying on it
+carries `self_approved` in its audit record. It does not relax the read-only
+rule, and it is read from the organization inside the request, never from a
+request body.
+
+Worth stating because it bounds the change: every combination the clinic
+actually wants — receptionist with cashier with dentist — was allowed all
+along. `director` is the only role whose combination with another trips a
+control, and while the declaration stands the assignment screen no longer
+offers it.
+
+**No approval workflow was added, on purpose.** Routing a merge or a refund
+to a second authority means routing it to nobody here.
+
+**The duplicate-patient review queue is built** (ADR-042). Registration is
+never refused on a suspicion; the queue shows both records side by side with
+every identifying field, says which record a merge would keep before anybody
+presses anything, and offers exactly two outcomes — *different people* or
+*same person* — each needing a note, with the merge behind a second explicit
+confirmation naming what is kept and what is filed away. The superseded
+record is kept and marked, never deleted.
+
+### How far this is verified
+
+To the project's own ten-point standard, last column included. Migrations
+`0010` and `0011` round-trip and `alembic check` is clean; 61 backend cases
+and 18 frontend cases cover the rules, the audit records, the permission
+delivery and both dead ends in both states — including seven over HTTP,
+because the refund gate lives in the router and only a request exercises it.
+
+**Both screens have been driven in a real Chrome**, as the owner, the cashier
+and then reception, and the pass is kept as `frontend/e2e/small-clinic.cjs`
+so it can be re-run rather than re-done. It checks that the declaration is
+refused to everybody but the owner, that it grants no permission to anybody,
+that a cashier may then close their own short till with the close recorded as
+`self_approved` while the shortage still reaches account 9430, and that no two
+patients merge without a person confirming it twice. It leaves the tenant as
+it found it, declaration included.
+
+**It found two defects, and neither could have been found any other way** —
+numbers 45 and 46 below. One of them had been shipped a commit earlier.
+
+Issuing a cash refund still has no screen at all; see *Known gaps*.
+
 ## Phases 4–7 · Not started
 
 | Phase | Scope | Blocked on |
@@ -405,10 +466,11 @@ still has to be done over the API. It belongs on the cash register screen,
 next to the expense and deposit controls.
 
 **No clinical screens.** See Phase 3c above. The routes and services are
-there and tested; the UI is the patient list, the patient account and the
-payment panel. The duplicate-review queue is the gap a user meets soonest: the
-patient account counts the reviews waiting on a patient and there is no screen
-on which to resolve one.
+there and tested; the UI is the patient list, the patient account, the payment
+panel and the duplicate-review queue. What a dentist cannot yet do from a
+browser is record a tooth: the encounter, the per-tooth record and the
+treatment plan have no screens, and `OPEN_QUESTIONS.md` C1 decides what each
+may show before one can be drawn.
 
 **No automated browser test in CI.** The UI has been driven in a real Chrome
 and inspected screen by screen (see `TESTING.md`), but that was a manual run.
@@ -672,23 +734,53 @@ right in all three — every one of these is about what the screen said.
     and again as a hint under the cash field, one line apart. Said once now,
     in the alert.
 
+## Found by running the small-clinic verification in a browser
+
+Two defects, both invisible to the test suite, and the reason this project
+drives a browser against a real database rather than trusting a green run.
+
+45. **A permission added to the catalogue never reached a database already in
+    service.** `permission` and the system roles' grants are seeded once, by
+    migration `0001`, which reads the application's own catalogue at migration
+    time. On a fresh database that is always current — and every test run
+    rebuilds from `base`, so the catalogue and the database always agreed
+    there. On a database migrated before a permission was written, nothing
+    delivered it. Two permissions were dead in every existing deployment:
+    `organization.duties.declare`, which made the duty-separation declaration
+    unreachable (the owner was refused their own setting with a 403, which is
+    how this was found), and `sales.debt.write_off`, which had shipped a
+    commit earlier with its route, its service and its audit event, held by
+    nobody. Migration `0011` delivers both, additively and idempotently, from
+    a frozen list that imports nothing (ADR-043); a declared catalogue in
+    `tests/security/test_permission_delivery.py` fails the suite the next time
+    somebody adds a permission without a migration behind it.
+46. **A patient search matched names against telephone numbers.** Any query
+    containing a digit was reduced to its digits and matched as a substring of
+    `phone_normalized`, so searching the surname `Karimova031930` returned
+    patients called `Oripov031930` — their number ends in those digits — and
+    searching a patient code like `P-00015` returned strangers whose number
+    contains `00015`. Showing one patient's record to somebody looking for
+    another is not a cosmetic fault. A query is now treated as a telephone
+    number only when it contains no letters and at least four digits, which
+    keeps `90 123 45 67` finding `+998901234567` and stops a two-digit query
+    matching most of the register.
+
 ## Next step
 
 Phase 3 is complete, including the clinic module's financial half. In order:
 
-1. **The clinical screens**: the encounter, the per-tooth record, the
-   treatment plan and the duplicate-review queue. The services and routes are
-   built; what is still open is `C1` (who may read clinical records), which
-   decides what each screen may show before it is drawn. The review queue is
-   the one a user misses first — the patient account already counts the
-   reviews waiting and offers nowhere to settle them.
+1. **The clinical screens**: the encounter, the per-tooth record and the
+   treatment plan. The services and routes are built; what is still open is
+   `C1` (who may read clinical records), which decides what each screen may
+   show before it is drawn. The duplicate-review queue, which used to head
+   this list, is built (ADR-042).
 2. **Phase 6 (part) — statutory reports**: the balance sheet and P&L, blocked
    on `A2` and `A3`.
 3. **Promote the browser passes into CI**, with the stack as a service and
-   browsers cached. `frontend/e2e/banking.cjs`, `frontend/e2e/policy.cjs` and
-   `frontend/e2e/clinic.cjs` are the passes kept as scripts rather than done
-   by hand; between them they found thirteen defects, and all three are
-   re-runnable.
+   browsers cached. `frontend/e2e/banking.cjs`, `frontend/e2e/policy.cjs`,
+   `frontend/e2e/clinic.cjs` and `frontend/e2e/small-clinic.cjs` are the
+   passes kept as scripts rather than done by hand; between them they found
+   fifteen defects, and all four are re-runnable.
 4. **Have an accountant review the workbook-derived policy.** It now has a
    screen to review it on, every rule carries its source note, and nothing
    else in `OPEN_QUESTIONS.md` A1/A4/A5 can be settled without that review.

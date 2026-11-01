@@ -46,6 +46,10 @@ POLICY_ACTIVATED: Final = "accounting.policy.activated"
 POLICY_DISCARDED: Final = "accounting.policy.discarded"
 
 # --- money movement (Phase 3+) ---------------------------------------------
+#: Declaring, or withdrawing, that the organization is too small to separate
+#: duties. It weakens an approval control for everyone, so it is recorded
+#: whatever else is or is not audited.
+DUTY_SEPARATION_DECLARED: Final = "organization.duties.declared"
 PAYMENT_RECORDED: Final = "sales.payment.recorded"
 PAYMENT_ALLOCATED: Final = "sales.payment.allocated"
 #: One submission of the payment form: cash, card, an applied advance, or a
@@ -101,6 +105,7 @@ REQUIRED_AUDIT_ACTIONS: Final[frozenset[str]] = frozenset(
         POLICY_CHANGED,
         PERIOD_CLOSED,
         PERIOD_REOPENED,
+        DUTY_SEPARATION_DECLARED,
         PAYMENT_RECORDED,
         ALLOCATION_REVERSED,
         REFUND_APPROVED,

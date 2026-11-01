@@ -180,6 +180,35 @@ class DuplicateReviewResponse(BaseModel):
     decision_note: str | None
 
 
+class DuplicateReviewDetail(BaseModel):
+    """A pending duplicate with both records attached, ready to compare.
+
+    The queue exists because name and birth year is the only key this clinic
+    has ever used, so two rows that look alike are expected rather than
+    exceptional. Deciding between them needs the two records side by side, and
+    an endpoint that returned ids would have every screen fetch them one at a
+    time and show whichever arrived first.
+
+    `survivor_id` says which record a merge would keep — the one already on
+    file, not the one just typed — so the screen can name it before anybody
+    presses anything, rather than reporting it afterwards.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    reason: str
+    status: DuplicateReviewStatus
+    created_at: datetime
+    decided_at: datetime | None
+    decision_note: str | None
+    #: The record the duplicate was raised *for*: normally the newer one.
+    patient: PatientSummary
+    #: The record it may be a duplicate of.
+    candidate: PatientSummary
+    survivor_id: uuid.UUID
+
+
 class ResolveReviewRequest(BaseModel):
     #: True merges the two records; False records that they are different
     #: people, so the pair is never raised again.

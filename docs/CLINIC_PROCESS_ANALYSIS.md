@@ -552,13 +552,19 @@ way *out* open.
 
 Stated plainly rather than left to be discovered:
 
-- **No clinical screens.** The encounter, treatment-item and duplicate-review
-  routes exist and are tested through their services, but the only clinic UI
-  is the patient list, the patient account and the payment panel. A dentist
-  cannot yet record a tooth from a browser.
-- **No test for the patient and treatment services of their own.** They are
-  exercised through the settlement and billing paths; `register`,
-  `find_duplicates`, `merge` and `correct_item` deserve direct cases.
+- **The duplicate-review queue is now built** (ADR-042): both records side by
+  side, every identifying field, the surviving record named before anybody
+  acts, two outcomes each needing a note, and the merge behind a second
+  explicit confirmation. It has not yet been driven in a browser.
+- **No clinical screens.** The encounter and treatment-item routes exist and
+  are tested through their services, but the clinic UI is the patient list,
+  the patient account, the payment panel and the duplicate queue. A dentist
+  cannot yet record a tooth from a browser, and `C1` decides what those
+  screens may show before they are drawn.
+- **The treatment service still has no tests of its own.** `correct_item` in
+  particular is exercised only through the billing path. `register`,
+  `find_duplicates` and `merge` now have direct cases in
+  `tests/clinic/test_duplicate_review.py`.
 - **The browser pass for step 12 has been done** and is kept as
   `frontend/e2e/clinic.cjs`, driven as reception and then as the cashier. It
   found three defects, all in what the panel displayed rather than what it

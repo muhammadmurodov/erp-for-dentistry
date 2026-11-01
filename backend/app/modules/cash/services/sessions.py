@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import Conflict, NotFound, PermissionDenied, ValidationFailed
 from app.core.money import ZERO, quantize
+from app.core.permissions import one_person_may_do_and_approve
 from app.modules.accounting.enums import PostingPurpose, SourceKind
 from app.modules.accounting.services.policy import PolicyService
 from app.modules.accounting.services.posting import (
@@ -714,6 +715,7 @@ class CashSessionService:
         actor_user_id: uuid.UUID | None = None,
         actor_may_approve: bool = False,
         actor_is_owner: bool = False,
+        duties_cannot_be_separated: bool = False,
     ) -> CashSession:
         """Close a counted session, posting any discrepancy.
 
@@ -723,6 +725,15 @@ class CashSessionService:
         `cash.discrepancy.approve` segregation-of-duties pair. The
         organization owner is exempt, because a single-owner clinic has
         nobody else (ADR-018); the audit trail is the compensating control.
+
+        An organization that has declared it cannot separate duties is exempt
+        on the same grounds, and then `cash.session.operate` is authority
+        enough: in a three-person clinic the person at the till is the only
+        person there, and refusing the close does not summon a second one —
+        it leaves the drawer open overnight, with the day's takings in it and
+        no ledger entry for the shortage. The close is marked `self_approved`
+        so the relaxation is visible in the record rather than inferred from
+        an absence (ADR-041).
         """
         session = await self.get_session(organization_id=organization_id, session_id=session_id)
         if session.status is SessionStatus.CLOSED:
@@ -734,13 +745,21 @@ class CashSessionService:
             )
 
         discrepancy = session.discrepancy or ZERO
+        self_approved = False
         if discrepancy != ZERO:
-            if not actor_may_approve:
+            alone = one_person_may_do_and_approve(
+                duties_cannot_be_separated=duties_cannot_be_separated,
+                actor_is_owner=actor_is_owner,
+            )
+            # Operating the till is authority enough only where there is
+            # nobody else to ask; otherwise the approval permission is still
+            # required, and still from a different pair of hands.
+            if not (actor_may_approve or alone):
                 raise PermissionDenied(
                     "Closing a session with a cash discrepancy requires approval authority"
                 )
             if (
-                not actor_is_owner
+                not alone
                 and actor_user_id is not None
                 and actor_user_id == session.counted_by_user_id
             ):
@@ -748,6 +767,9 @@ class CashSessionService:
                     "The person who counted the cash cannot also approve the "
                     "discrepancy. Ask someone else to approve it."
                 )
+            self_approved = (
+                actor_user_id is not None and actor_user_id == session.counted_by_user_id
+            )
 
             await self._post_discrepancy(
                 organization_id=organization_id,
@@ -773,6 +795,11 @@ class CashSessionService:
                 "counted": session.counted_amount,
                 "discrepancy": discrepancy,
                 "approved": discrepancy != ZERO,
+                # The person who counted also signed it off, because the
+                # organization has declared there is nobody else. Recorded on
+                # the row rather than left to be worked out from two user ids
+                # that happen to match (ADR-041).
+                "self_approved": self_approved,
             },
         )
         if discrepancy != ZERO:

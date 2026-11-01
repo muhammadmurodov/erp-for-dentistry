@@ -58,6 +58,13 @@ export interface Organization {
   timezone: string
   default_locale: string
   is_active: boolean
+  /**
+   * Declared by the owner: too few people here to put a different person on
+   * each side of an approval control. It grants nobody a permission; it
+   * removes only the requirement that an approver be somebody else.
+   */
+  duties_cannot_be_separated: boolean
+  duties_declared_at: string | null
 }
 
 export interface Currency {
@@ -94,6 +101,12 @@ export interface Role {
   description: string | null
   is_system: boolean
   is_read_only: boolean
+  /**
+   * False for a role this organization has no use for — a middle-management
+   * role in a three-person clinic. The assignment screen leaves it out rather
+   * than offering a choice whose only outcome is a refusal.
+   */
+  offered_for_assignment: boolean
   permission_codes: string[]
 }
 
@@ -678,6 +691,28 @@ export interface DuplicateCandidate {
 export interface PatientRegistered {
   patient: PatientSummary
   duplicate_candidates: DuplicateCandidate[]
+}
+
+/**
+ * A suspected duplicate with both records attached.
+ *
+ * Nothing in this queue has been merged. Registration is never refused on a
+ * suspicion, so a row here means two records look alike and nobody has
+ * decided yet.
+ */
+export interface DuplicateReviewDetail {
+  id: string
+  reason: string
+  status: 'PENDING' | 'MERGED' | 'DISTINCT'
+  created_at: string
+  decided_at: string | null
+  decision_note: string | null
+  /** The record the review was raised for: normally the newer one. */
+  patient: PatientSummary
+  /** The record it may be a duplicate of. */
+  candidate: PatientSummary
+  /** Which record a merge would keep. Known before anybody acts. */
+  survivor_id: string
 }
 
 export interface PatientBalance {

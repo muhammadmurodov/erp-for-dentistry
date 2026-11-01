@@ -4,6 +4,7 @@ import { useI18n } from '@/i18n'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { PageHeader } from '@/components/ui'
 import { OrganizationSettings } from './OrganizationSettings'
+import { DutySeparationCard } from './DutySeparationCard'
 import { UsersSettings } from './UsersSettings'
 import { RolesSettings } from './RolesSettings'
 import { AuditSettings } from './AuditSettings'
@@ -68,7 +69,18 @@ export function SettingsPage() {
       <Routes>
         <Route index element={<Navigate to={first} replace />} />
         {can('organization.read') ? (
-          <Route path="organization" element={<OrganizationSettings />} />
+          <Route
+            path="organization"
+            element={
+              <div className="space-y-5">
+                <OrganizationSettings />
+                {/* Below the profile, because it is a control setting rather
+                    than a detail of the organization — and it renders
+                    nothing at all for anybody but the owner. */}
+                <DutySeparationCard />
+              </div>
+            }
+          />
         ) : null}
         {can('identity.user.read') ? (
           <Route path="users" element={<UsersSettings />} />

@@ -14,9 +14,11 @@ they can be re-run after a change instead of re-done:
 | `banking.cjs` | statement import, matching, bank accounts | the accountant |
 | `policy.cjs` | accounting policy versions and rules | the owner |
 | `clinic.cjs` | patients, the account, taking a payment | reception, then the cashier |
+| `small-clinic.cjs` | the duty-separation declaration and the duplicate-patient queue | the owner, the cashier, then reception |
 
-Between them they have found thirteen defects, two of them in code that had
-been passing its unit tests since Phase 2.
+Between them they have found fifteen defects, two of them in code that had
+been passing its unit tests since Phase 2, and two that no test run could have
+found because every suite rebuilds the database from `base`.
 
 ## What they check
 
@@ -54,6 +56,36 @@ any of:
   taking the money moves cash and clears the receivable without touching
   revenue again.
 
+`small-clinic.cjs` drives the two things built for a clinic of three
+(ADR-041, ADR-042), and is mostly about limits, because both features relax
+something. It declares duty separation as the owner and checks that a cashier
+is neither shown the card nor allowed the endpoint; that the reason is
+mandatory on the screen and at the API; that the declaration lands in the
+audit trail with the reason that was typed; that `director` stops being
+offered while every role the clinic uses still is; that a cashier may then
+close their own short till and the close is recorded as `self_approved`, while
+the same close is refused with the declaration withdrawn; and that the
+shortage still reaches account 9430 either way — relaxing who approves must
+not change what the books say. Then it registers patients as reception and
+works the duplicate queue. It fails on any of:
+
+- the declaration being offered to, or accepted from, anybody but the owner;
+- a declaration taken without a reason, or missing from the audit trail;
+- the declaration granting any permission at all — a receptionist who can
+  suddenly read the chart of accounts, the audit trail or the cash registers,
+  or a cashier who can register a patient;
+- two patients merging without a person confirming it twice, or the
+  confirmation failing to name which record is kept and which is filed away;
+- a brother — same surname and birth year, different given name — being
+  reported as a possible duplicate;
+- a superseded record being deleted rather than kept, marked and still
+  readable by id;
+- a name query returning patients matched on the digits of their telephone
+  number;
+- the queue being offered to somebody who may not settle one.
+
+It leaves the tenant as it found it, including the declaration.
+
 `policy.cjs` drives the policy editor as the owner — the only role that may
 change it — building a version, adding and editing rules, putting it into
 force, discarding a mistaken draft, and checking that an accountant sees the
@@ -61,13 +93,16 @@ same screen with no control that changes it. A step declares the HTTP
 refusals it means to provoke, so the application correctly refusing something
 is not reported as a fault.
 
-All three are re-runnable against the same tenant: `banking.cjs` creates its
+All four are re-runnable against the same tenant: `banking.cjs` creates its
 own bank account and seeds its own card payment, `policy.cjs` takes its
 effective date from whatever is in force and clears any draft left behind, and
 `clinic.cjs` creates its own staff, service and patients, then banks what it
 took and closes the drawer it opened — a cash account may only hold what the
 ledger says it holds, so a pass that left money in the till would be refused
-the next time it tried to open one.
+the next time it tried to open one. `small-clinic.cjs` does not assume what
+the drawer holds either: it asks for a float of nothing and reads the
+refusal, which is how it learns what the previous session counted without
+reimplementing the rule.
 
 Screenshots of every step land in `e2e/shots/`, which is not committed.
 
@@ -95,10 +130,12 @@ cd backend && .venv/bin/python -m app.cli seed-demo
 node frontend/e2e/banking.cjs
 node frontend/e2e/policy.cjs
 node frontend/e2e/clinic.cjs
+node frontend/e2e/small-clinic.cjs
 ```
 
-`clinic.cjs` adds the two accounts it needs — a receptionist and a cashier —
-the first time it runs, and signs in as them afterwards.
+`clinic.cjs` and `small-clinic.cjs` add the two accounts they need — a
+receptionist and a cashier — the first time they run, and sign in as them
+afterwards.
 
 Each prints `0 problem(s)` when every screen is sound, and otherwise lists
 each problem with the step that produced it.

@@ -14,8 +14,15 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import AuditDep, DbSession, OrgCtx, require_permissions
-from app.core.errors import Conflict
+from app.api.deps import (
+    AuditDep,
+    DbSession,
+    DutySeparation,
+    OrgCtx,
+    require_any_permission,
+    require_permissions,
+)
+from app.core.errors import Conflict, PermissionDenied
 from app.modules.cash.enums import SessionStatus
 from app.modules.cash.models import CashSession
 from app.modules.cash.schemas import (
@@ -228,7 +235,9 @@ async def take_cash_payment(
 @router.post(
     "/sessions/{session_id}/refunds",
     response_model=PaymentResponse,
-    dependencies=[Depends(require_permissions("sales.refund.approve"))],
+    dependencies=[
+        Depends(require_any_permission("sales.refund.approve", "sales.refund.request"))
+    ],
 )
 async def refund_cash_payment(
     session_id: uuid.UUID,
@@ -236,6 +245,7 @@ async def refund_cash_payment(
     context: OrgCtx,
     db: DbSession,
     audit: AuditDep,
+    duties_combined: DutySeparation,
 ) -> PaymentResponse:
     """Give a cash payment back out of this drawer.
 
@@ -249,6 +259,20 @@ async def refund_cash_payment(
     refund given the next day comes out of the till that is open now.
     """
     organization_id = context.require_organization()
+
+    # Approval authority, or the request side of it where the organization has
+    # declared there is nobody else to ask. The cashier role holds
+    # `sales.refund.request` and not `.approve`, which in a three-person
+    # clinic meant nobody present could hand back money they had just taken
+    # in error (ADR-041).
+    if not context.has("sales.refund.approve") and not duties_combined:
+        raise PermissionDenied(
+            "Giving a payment back needs approval authority. Ask the owner, "
+            "or declare in the organization settings that this clinic has too "
+            "few people to separate duties.",
+            details={"required": "sales.refund.approve"},
+        )
+
     billing = BillingService(db, audit)
     cash = CashSessionService(db, audit)
 
@@ -270,11 +294,23 @@ async def refund_cash_payment(
             details={"method": payment.method.value},
         )
 
+    # Literally what the field says: the person handing the money back is the
+    # person who took it. Lacking `sales.refund.approve` is *why* this was
+    # allowed, but it is not the same statement — a second cashier refunding a
+    # colleague's payment is not self-approval, and recording it as one would
+    # make the flag useless for the only purpose it has, which is finding the
+    # cases a reviewer should look at.
+    self_approved = (
+        payment.recorded_by_user_id is not None
+        and payment.recorded_by_user_id == context.user_id
+    )
+
     refunded = await billing.refund_payment(
         organization_id=organization_id,
         payment_id=payload.payment_id,
         reason=payload.reason,
         actor_user_id=context.user_id,
+        self_approved=self_approved,
     )
     await cash.record_payment_refund(
         organization_id=organization_id,
@@ -388,13 +424,19 @@ async def submit_count(
     dependencies=[Depends(require_permissions("cash.session.operate"))],
 )
 async def close_session(
-    session_id: uuid.UUID, context: OrgCtx, db: DbSession, audit: AuditDep
+    session_id: uuid.UUID,
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+    duties_combined: DutySeparation,
 ) -> CashSessionDetail:
     """Close a counted session, posting any discrepancy.
 
     A session that balanced closes on the cashier's own authority. One that
     did not needs `cash.discrepancy.approve`, held by somebody other than the
-    person who counted it.
+    person who counted it — unless this organization has declared it cannot
+    separate duties, in which case running the till is authority enough and
+    the close is recorded as self-approved (ADR-041).
     """
     organization_id = context.require_organization()
     service = CashSessionService(db, audit)
@@ -406,6 +448,7 @@ async def close_session(
         # The owner is exempt from the segregation-of-duties pair: a
         # single-owner clinic has nobody else (ADR-018).
         actor_is_owner=context.has("accounting.policy.manage"),
+        duties_cannot_be_separated=duties_combined,
     )
     await db.commit()
     return await _session_detail(db, audit, organization_id, session)

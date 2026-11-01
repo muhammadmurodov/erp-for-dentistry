@@ -616,8 +616,15 @@ class BillingService:
         payment_id: uuid.UUID,
         reason: str,
         actor_user_id: uuid.UUID | None = None,
+        self_approved: bool = False,
     ) -> Payment:
-        """Reverse a payment in full. Requires approval authority."""
+        """Reverse a payment in full. Requires approval authority.
+
+        `self_approved` is recorded, not enforced: whether one person may both
+        take a payment and give it back is decided at the edge, where the
+        organization's duty-separation declaration is known (ADR-041). This
+        only makes sure the resulting audit row says which it was.
+        """
         if not reason or not reason.strip():
             raise ValidationFailed("A refund requires a reason")
 
@@ -676,7 +683,14 @@ class BillingService:
             reason=reason.strip(),
             business_event=f"payment:{payment.id}",
             old_values={"status": "RECORDED"},
-            new_values={"status": "REFUNDED", "amount": payment.amount},
+            new_values={
+                "status": "REFUNDED",
+                "amount": payment.amount,
+                # True when the person who took the money also gave it back,
+                # which only an organization that has declared it cannot
+                # separate duties may do (ADR-041).
+                "self_approved": self_approved,
+            },
         )
         return payment
 

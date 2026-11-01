@@ -62,6 +62,34 @@ def normalize_phone(raw: str | None) -> str | None:
     return digits[:20]
 
 
+#: Fewer digits than this is not worth matching a telephone number on: four
+#: is the tail a receptionist reads back to a patient ("…45 67"), and three
+#: would match most of the register.
+PHONE_SEARCH_MIN_DIGITS = 4
+
+
+def looks_like_a_phone_number(raw: str | None) -> bool:
+    """Is this search term a telephone number rather than a name or a code?
+
+    Only digits and the punctuation numbers are written with. A single letter
+    makes it a name — `Karimova031930` is not a telephone number, and treating
+    its digits as one matched other patients by the tail of their number.
+
+    The minimum length matters as much as the alphabet: a two-digit query
+    would match almost every patient on file, burying the name results the
+    person was actually looking for.
+    """
+    if raw is None:
+        return False
+    term = raw.strip()
+    if not term:
+        return False
+    if any(character.isalpha() for character in term):
+        return False
+    digits = _NON_DIGITS.sub("", term)
+    return len(digits) >= PHONE_SEARCH_MIN_DIGITS
+
+
 def _clean(value: str | None) -> str | None:
     if value is None:
         return None
@@ -387,6 +415,46 @@ class PatientService:
             stmt = stmt.where(PatientDuplicateReview.status == status)
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def review_queue(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        status: DuplicateReviewStatus | None = DuplicateReviewStatus.PENDING,
+    ) -> list[tuple[PatientDuplicateReview, Patient, Patient]]:
+        """Reviews with both records attached, newest first.
+
+        One query for the reviews and one for every patient they mention,
+        rather than two per review: the queue is short in a clinic this size,
+        but a list endpoint that fans out per row is how a short list becomes
+        a slow screen as the years accumulate.
+
+        A review whose patients have since been deleted is skipped rather than
+        raised: nothing can be decided about records that are not there, and a
+        queue that cannot be opened is worse than one missing a row.
+        """
+        reviews = await self.list_reviews(organization_id=organization_id, status=status)
+        if not reviews:
+            return []
+        wanted = {r.patient_id for r in reviews} | {r.candidate_patient_id for r in reviews}
+        rows = (
+            await self._session.execute(
+                select(Patient).where(
+                    Patient.organization_id == organization_id,
+                    Patient.id.in_(wanted),
+                )
+            )
+        ).scalars()
+        by_id = {p.id: p for p in rows}
+        queue: list[tuple[PatientDuplicateReview, Patient, Patient]] = []
+        for review in reviews:
+            patient = by_id.get(review.patient_id)
+            candidate = by_id.get(review.candidate_patient_id)
+            if patient is None or candidate is None:
+                continue
+            queue.append((review, patient, candidate))
+        queue.sort(key=lambda item: item[0].created_at, reverse=True)
+        return queue
+
     async def resolve_review(
         self,
         *,
@@ -507,7 +575,12 @@ class PatientService:
 
         The query is matched against the normalised telephone number as well
         as the name, so `90 123 45 67` finds a patient recorded as
-        `+998901234567`.
+        `+998901234567` — but only when the query *is* a telephone number.
+        A term with letters in it is a name or a code, and matching its stray
+        digits against everybody's telephone number returned strangers:
+        searching the code `P-00015` once produced five unrelated patients,
+        because `00015` is a substring of their numbers. Showing one patient's
+        record to somebody looking for another is not a cosmetic fault.
         """
         stmt = select(Patient).where(Patient.organization_id == organization_id)
         if not include_merged:
@@ -518,7 +591,7 @@ class PatientService:
                 func.lower(Patient.display_name).like(text_term),
                 func.lower(Patient.code).like(text_term),
             ]
-            phone_term = normalize_phone(query)
+            phone_term = normalize_phone(query) if looks_like_a_phone_number(query) else None
             if phone_term:
                 conditions.append(Patient.phone_normalized.like(f"%{phone_term}%"))
             stmt = stmt.where(or_(*conditions))

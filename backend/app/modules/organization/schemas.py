@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -26,6 +26,10 @@ class OrganizationResponse(BaseModel):
     timezone: str
     default_locale: str
     is_active: bool
+    #: See `Organization.duties_cannot_be_separated`. Read by the screens so
+    #: a control that has been relaxed says so where it applies.
+    duties_cannot_be_separated: bool
+    duties_declared_at: datetime | None
 
 
 class OrganizationUpdateRequest(BaseModel):
@@ -40,6 +44,18 @@ class OrganizationUpdateRequest(BaseModel):
     registered_on: date | None = None
     timezone: str | None = Field(default=None, max_length=64)
     default_locale: str | None = Field(default=None, pattern="^(uz|ru|en)$")
+
+
+class DutySeparationRequest(BaseModel):
+    """Declare — or withdraw — that duties cannot be separated here.
+
+    A reason is mandatory in both directions. Turning it on weakens an
+    approval control; turning it off can leave a clinic unable to close its
+    own till. Neither should be possible to do without saying why.
+    """
+
+    duties_cannot_be_separated: bool
+    reason: str = Field(min_length=3, max_length=1000)
 
 
 class OrganizationCreateRequest(BaseModel):

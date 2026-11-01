@@ -34,6 +34,7 @@ from app.modules.clinic.schemas import (
     CompleteItemRequest,
     CorrectItemRequest,
     DuplicateCandidateResponse,
+    DuplicateReviewDetail,
     DuplicateReviewResponse,
     EncounterCompleteRequest,
     EncounterOpenRequest,
@@ -296,18 +297,41 @@ async def merge_patient(
 
 @router.get(
     "/duplicate-reviews",
-    response_model=list[DuplicateReviewResponse],
+    response_model=list[DuplicateReviewDetail],
     dependencies=[Depends(require_permissions("clinic.patient.manage"))],
 )
 async def list_duplicate_reviews(
     context: OrgCtx,
     db: DbSession,
     audit: AuditDep,
-) -> list[DuplicateReviewResponse]:
-    reviews = await PatientService(db, audit).list_reviews(
+) -> list[DuplicateReviewDetail]:
+    """The queue of suspected duplicates, both records attached.
+
+    Nothing here has been merged. Registration never refuses a patient on a
+    suspicion — the receptionist has the person in front of them — so a row in
+    this queue means two records look alike and nobody has decided yet. The
+    decision needs the two side by side, which is why the records travel with
+    the review instead of as ids to go and fetch.
+    """
+    queue = await PatientService(db, audit).review_queue(
         organization_id=context.require_organization()
     )
-    return [DuplicateReviewResponse.model_validate(r) for r in reviews]
+    return [
+        DuplicateReviewDetail(
+            id=review.id,
+            reason=review.reason,
+            status=review.status,
+            created_at=review.created_at,
+            decided_at=review.decided_at,
+            decision_note=review.decision_note,
+            patient=PatientSummary.model_validate(patient),
+            candidate=PatientSummary.model_validate(candidate),
+            # `resolve_review` folds the patient into the candidate: the record
+            # already on file is the one that keeps its history.
+            survivor_id=candidate.id,
+        )
+        for review, patient, candidate in queue
+    ]
 
 
 @router.post(

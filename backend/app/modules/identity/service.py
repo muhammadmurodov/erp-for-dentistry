@@ -36,6 +36,7 @@ from app.core.logging import get_logger
 from app.core.permissions import (
     SEGREGATION_OF_DUTIES,
     check_role_permission_set,
+    one_person_may_do_and_approve,
 )
 from app.core.security import (
     create_access_token,
@@ -578,7 +579,15 @@ class IdentityService:
     async def set_membership_roles(
         self, *, membership: Membership, role_codes: list[str]
     ) -> list[Role]:
-        """Replace this membership's roles, refusing conflicting combinations."""
+        """Replace this membership's roles, refusing conflicting combinations.
+
+        Unless the organization has declared it cannot separate duties, in
+        which case one person holding both sides of a control is the point:
+        a clinic with three people needs the receptionist to take money on a
+        Saturday, and refusing the grant does not create a fourth person
+        (ADR-041). The declaration is read from the organization rather than
+        passed in, so a caller cannot ask for the relaxation.
+        """
         requested = sorted(set(role_codes))
         roles = await self._load_roles(organization_id=membership.organization_id, codes=requested)
 
@@ -588,8 +597,14 @@ class IdentityService:
         for role in roles:
             combined |= {link.permission_code for link in role.permissions}
         granted_codes = {r.code for r in roles}
+        organization = await OrganizationService(self._session, self._audit).get(
+            membership.organization_id
+        )
         problems: list[str] = []
-        if "owner" not in granted_codes:
+        if not one_person_may_do_and_approve(
+            duties_cannot_be_separated=organization.duties_cannot_be_separated,
+            actor_is_owner="owner" in granted_codes,
+        ):
             for left, right, reason in SEGREGATION_OF_DUTIES:
                 if left in combined and right in combined:
                     problems.append(f"{reason} ({left} + {right})")

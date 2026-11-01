@@ -60,6 +60,7 @@ MODULES: tuple[ModuleInfo, ...] = (
         required_permission="clinic.patient.read",
         available_features=(
             "patient registration with duplicate review",
+            "duplicate review queue: compare two records and decide",
             "patient account: debt, advances and bills",
             "payment: cash, card, advances, with a derived remaining balance",
             "drafting an invoice from completed treatment",
@@ -68,7 +69,6 @@ MODULES: tuple[ModuleInfo, ...] = (
             "appointment scheduling screen",
             "clinical record screen: encounters, teeth, findings",
             "treatment plan screen",
-            "duplicate review queue screen",
         ),
     ),
     ModuleInfo(
@@ -108,6 +108,7 @@ MODULES: tuple[ModuleInfo, ...] = (
             "daily close posting shortage or overage",
         ),
         missing_features=(
+            "giving a cash payment back has no screen yet",
             "fiscal receipt generation and import",
             "cash transfers between registers",
             "multi-currency tills",

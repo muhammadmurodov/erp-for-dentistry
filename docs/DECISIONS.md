@@ -974,3 +974,214 @@ a typo in it. The lesson that generalises: a uniqueness rule over an entity
 and a *reference* usually wants the kind of relationship in the key, because
 the same two things can legitimately be related more than once in different
 ways.
+
+## ADR-041 — An organization may declare that it cannot separate duties
+
+**Context.** Segregation of duties assumes somebody else is standing there.
+The pairs in `SEGREGATION_OF_DUTIES` exist because the person who takes money
+should not be the person who signs off that it was taken correctly, and in an
+organization with a finance department that is both achievable and right.
+
+This clinic is run by two or three members of one family. Until now the only
+exemption was the **owner** (ADR-018), on the grounds that a single-owner MChJ
+has nobody to delegate to — and that left two dead ends for everybody else,
+both reachable on an ordinary day:
+
+A cashier who counted the till and found it 5 000 short **could not close the
+session at all.** Closing a session with a discrepancy needs
+`cash.discrepancy.approve`, which the cashier role does not hold, and which
+only `owner` and `director` do. If the owner was not in, the drawer stayed
+open with the day's takings in it and no ledger entry for the shortage.
+
+A cashier who took a payment in error **could not give it back.** The refund
+route needs `sales.refund.approve`; the cashier holds `sales.refund.request`.
+
+Neither refusal produces a second person. What it produces is a workaround —
+and the workaround in a three-person clinic is that everybody signs in as the
+owner, which does not weaken the audit trail so much as empty it.
+
+**Decision.** The exemption becomes something the organization states about
+itself: `organization.duties_cannot_be_separated`, declared by the owner,
+with a mandatory reason, audited in both directions under
+`organization.duties.declared` — an event in `REQUIRED_AUDIT_ACTIONS`,
+because weakening an approval control is not something an audit
+configuration gets to leave out. `duties_declared_at` records when it was
+last looked at, since that is the first question a reviewer asks about a
+relaxed control; *who* declared it lives in the audit row, which is the
+authority, because a column can be updated and an audit row cannot.
+
+`organization.duties.declare` is held by the `owner` role alone. It is the
+one setting that decides whether a control applies to the person at the till
+or to somebody standing behind them, and there is nobody above the owner to
+ask.
+
+**One function decides, everywhere.**
+`one_person_may_do_and_approve(duties_cannot_be_separated, actor_is_owner)`
+is the whole rule. Three places consult it: closing a session with a
+discrepancy, refunding a cash payment, and granting a combination of roles to
+one person. A fourth place that needs the same question later asks the same
+function rather than growing its own version of the condition.
+
+**What it does not do.** It grants nobody a permission — every operation
+still requires one, and the declaration removes only the requirement that the
+approver be a *different* person, which is the single condition a
+three-person clinic cannot satisfy. It does not relax the read-only rule, so
+an auditor stays an auditor. It does not admit unknown permissions. And it is
+read from the organization inside the request, never taken from a request
+body, so an endpoint cannot be talked into relaxing a control; a service that
+is never told defaults to the strict rule, which is the safe direction to
+fail in.
+
+**Every act that relies on it says so.** A close performed by the person who
+counted carries `self_approved: true` in its audit record, and so does a
+refund given by whoever took the payment. The compensating control is a
+readable record rather than a second signature that was never going to
+exist — and `self_approved` is written on the row rather than left to be
+worked out later by comparing two user ids that happen to match.
+
+**No approval workflow was added, deliberately.** The obvious alternative —
+reception *requests* a merge or a refund and somebody *approves* it — was
+rejected for this clinic: there is no second authority to route the request
+to, so the queue would fill with items only the owner could clear, which is
+the dead end above with an extra step in front of it. If the clinic grows a
+layer of management, the declaration comes off and the existing pairs apply
+again, unchanged.
+
+**`director` stops being offered.** It is the only role whose combination
+with another trips a control, and in a clinic of three nobody is a middle
+manager, so the assignment screen leaves it out while the declaration stands
+(`ROLES_FOR_LARGER_ORGANIZATIONS`). It stays defined and stays grantable over
+the API, for an organization that grows into it. Worth stating plainly: every
+combination the clinic actually wants — receptionist with cashier with
+dentist — was allowed all along, and a test asserts it, so this feature is
+not a licence to assume every refusal needs a setting.
+
+**Consequences.** `POST /organization/duty-separation` is the one way to set
+it. Migration `0010` adds the column, the date, and a check constraint that a
+declaration must carry a date. Eighteen cases in
+`tests/security/test_duty_separation.py` cover the rule itself, the
+declaration and its audit, both dead ends in both states, and the limits —
+that an auditor is still read-only, that an unknown permission is still
+refused, and that a till which balanced never needed any of this.
+
+The honest summary: this does not make the clinic's books safer. It makes
+them *true*, by removing the reason to share a login. A control nobody can
+satisfy is not a control.
+
+## ADR-042 — A duplicate patient is shown, compared and confirmed; never merged by matching
+
+**Context.** The clinic has never had a patient number. The paper register
+identifies people by family name and birth year, and the same person appears
+on different days as unrelated rows, so two records that look alike are the
+normal case rather than an anomaly. Two brothers with the same surname, born
+the same year, are indistinguishable on the only key the clinic has ever
+used — and a wrong merge joins two people's dental histories, which is not a
+bookkeeping error.
+
+**Decision.** Matching raises a question; a person answers it.
+
+Registration is **never refused** on a suspicion: the receptionist has the
+patient in front of them, and a wrong refusal costs more than a review. The
+new record is created, the candidates come back with it, and a
+`PENDING` review is queued for each pair.
+
+The queue screen shows **both records side by side**, every identifying field,
+including the ones that agree — a comparison showing only the differences
+leaves the reader unable to tell a record with one typo from a record about
+somebody else. Which record a merge would keep is stated *before* anybody
+presses anything (`survivor_id`: the record already on file, not the one just
+typed), rather than reported afterwards.
+
+There are exactly **two outcomes, both decisions**: `DISTINCT` — these are
+different people, recorded so the pair is never raised again — and `MERGED`.
+Each requires a note. "Not a duplicate" is as much of a decision as a merge,
+and the next receptionist to see these two records deserves to know somebody
+already looked.
+
+A merge is behind a **second, explicit confirmation** that names the record
+being kept and the record being filed away, because it is the one action on
+the screen that cannot be undone from the screen. It requires
+`clinic.patient.manage`, and — per ADR-041 — there is no separate approval
+step: in a clinic of three, routing the merge to a second authority means
+routing it to nobody.
+
+**The losing record is kept.** It is marked `merged_into_patient_id`,
+deactivated, and left in place. Treatments were recorded against it, and an
+audit trail that cannot say where they went is no audit trail. Clinical
+records are not moved either: they stay attached to the encounter that
+produced them, and the surviving record gathers them through the merge link.
+`clinic.patient.merged` is in `REQUIRED_AUDIT_ACTIONS`.
+
+**What counts as a difference is tested, not eyeballed.**
+`lib/patientIdentity.ts` normalizes before comparing — trimmed, inner
+whitespace collapsed, case-folded, telephone numbers reduced to digits — and
+a blank on one side is reported as *missing*, not as a disagreement. Getting
+that wrong in either direction is how a screen misleads: an invented
+difference argues against a merge that was correct, and a hidden one argues
+for a merge that was not. Eighteen frontend cases cover it, including the
+cases from the register — two brothers, the same person typed twice with less
+in the second row, and a household telephone number under two different
+names. The screen displays the original spelling, never the normalized one.
+
+**Consequences.** `GET /clinic/duplicate-reviews` returns the reviews with
+both patient records attached, in one query for the reviews and one for every
+patient they mention, rather than two round trips per row. Eighteen backend
+cases in `tests/clinic/test_duplicate_review.py` assert the boundary this ADR
+is about: that a matching name and birth year is reported and not refused,
+that both records stay live and separate until somebody decides, that a
+settled pair is not raised again, and that a merge keeps what it supersedes.
+
+## ADR-043 — A data migration states what it seeds; it never reads the catalogue
+
+**Context.** `permission` and the system roles' grants are reference data: the
+application's own permission catalogue, in the database, so that a role grant
+can be enforced by a foreign key rather than by a string somebody hopes is
+spelled correctly. Migration `0001` seeds both by importing
+`app.core.permissions.PERMISSIONS` and writing whatever it finds.
+
+On a fresh database that is always correct, and that is exactly why it went
+unnoticed. Every test run rebuilds the database from `base`, so `0001` seeds
+today's catalogue and the two always agree. On a database migrated before a
+permission was written, nothing delivers it — there is no later migration, and
+nothing reconciles at startup.
+
+Two permissions were therefore dead in every existing deployment.
+`sales.debt.write_off` shipped with a route, a service, an audit event and an
+owner-only grant in the role definitions, and no role in a real database held
+it. `organization.duties.declare` made the whole duty-separation declaration
+unreachable: the owner was refused their own setting with a 403, which is how
+it was found — by opening the screen in a browser against a database that had
+been migrated months earlier.
+
+**Decision.** A data migration declares its contents literally. `0011` carries
+an explicit `LATE_PERMISSIONS` and `LATE_GRANTS`, written out at that
+revision, and imports nothing from the application. A migration that reads
+today's code does something different depending on when it runs, which means
+the schema a database ends up with depends on the order history happened in —
+the one thing a migration chain exists to prevent.
+
+It is additive and idempotent: `ON CONFLICT DO NOTHING` on both tables, so it
+is safe on a fresh database where `0001` already seeded everything, and on one
+that is behind. Nothing is removed. Withdrawing a permission has consequences
+for whoever holds it and belongs in a migration of its own, written
+deliberately, not as a side effect of reconciliation.
+
+**The guard is a declared list, not a convention.**
+`tests/unit`-style assertions could not catch this, because the test database
+is always current. So `tests/security/test_permission_delivery.py` holds the
+catalogue frozen: adding a permission fails the suite until the author
+re-declares it, which is the moment to ask how it reaches a database already
+in service. The same file checks the live database both ways — every catalogue
+permission has a row, every row is in the catalogue, and every system role's
+grants match its definition exactly, because an extra grant is authority
+nobody wrote down and this project has shipped one of those before (the
+`director` role holding both sides of a purchasing control).
+
+It also checks `0011`'s frozen lists against the catalogue they claim to
+deliver. A frozen list that has silently drifted is worse than not having one.
+
+**Consequences.** `0001` is left as it is: rewriting an applied migration to
+freeze its list would change what a fresh install seeds for no benefit, since
+`0011` now reconciles anything `0001` missed and the declared list catches
+the next addition. The lasting rule is the one in the title, and the cost of
+breaking it was two features that worked on every machine except a real one.

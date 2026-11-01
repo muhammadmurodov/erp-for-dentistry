@@ -85,7 +85,14 @@ export function UsersSettings() {
   }
 
   const rows = users.data ?? []
-  const availableRoles = roles.data ?? []
+  // A role the backend says is not worth offering here is left out rather
+  // than shown and then refused. In a three-person clinic that is `director`:
+  // the only role whose combination with another breaks a control, and the
+  // only one nobody is available to fill (ADR-041). It stays grantable over
+  // the API for an organization that grows into it.
+  const availableRoles = (roles.data ?? []).filter(
+    (role) => role.offered_for_assignment,
+  )
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.users })

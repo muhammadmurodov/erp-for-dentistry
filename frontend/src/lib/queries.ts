@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { api } from './api'
 import type {
+  DuplicateReviewDetail,
   Account,
   AccountingPolicy,
   BankAccount,
@@ -91,6 +92,7 @@ export const queryKeys = {
   patients: (filters: Record<string, unknown>) =>
     ['clinic', 'patients', filters] as const,
   patient: (id: string) => ['clinic', 'patient', id] as const,
+  duplicateReviews: ['clinic', 'duplicate-reviews'] as const,
   settlement: (invoiceId: string) => ['clinic', 'settlement', invoiceId] as const,
   settlementHistory: (invoiceId: string) =>
     ['clinic', 'settlement', invoiceId, 'history'] as const,
@@ -470,6 +472,21 @@ export function usePatients(
   return useQuery({
     queryKey: queryKeys.patients(filters),
     queryFn: () => api.get<PatientSummary[]>('/clinic/patients', filters),
+    enabled,
+  })
+}
+
+/**
+ * The queue of suspected duplicates, both records attached so they can be
+ * compared without a second round trip per row.
+ */
+export function useDuplicateReviews(
+  enabled: boolean,
+): UseQueryResult<DuplicateReviewDetail[]> {
+  return useQuery({
+    queryKey: queryKeys.duplicateReviews,
+    queryFn: () =>
+      api.get<DuplicateReviewDetail[]>('/clinic/duplicate-reviews'),
     enabled,
   })
 }

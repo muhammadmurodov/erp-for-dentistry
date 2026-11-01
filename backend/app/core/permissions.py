@@ -37,6 +37,12 @@ PERMISSIONS: tuple[Permission, ...] = (
     # --- Organization -------------------------------------------------------
     _p("organization.read", "organization", "View organization profile"),
     _p("organization.manage", "organization", "Edit organization profile", True),
+    _p(
+        "organization.duties.declare",
+        "organization",
+        "Declare that the organization has too few people to separate duties",
+        True,
+    ),
     _p("organization.period.read", "organization", "View fiscal years and periods"),
     _p("organization.period.manage", "organization", "Open, close and reopen periods", True),
     # --- Accounting ---------------------------------------------------------
@@ -178,6 +184,45 @@ SEGREGATION_OF_DUTIES: tuple[tuple[str, str, str], ...] = (
 
 #: Read-only roles may hold no write permission at all.
 READ_ONLY_ROLE_CODES: frozenset[str] = frozenset({"auditor"})
+
+#: Roles that only make sense once there are enough people to have a layer of
+#: management between the owner and the people doing the work. A three-person
+#: family clinic has nobody to put in them, and offering one is how an owner
+#: ends up meeting a segregation-of-duties refusal for no benefit: `director`
+#: is the only role whose combination with another trips a control at all.
+#: These are still defined, still grantable over the API, and simply not
+#: offered by the assignment screen while the organization has declared itself
+#: too small to separate duties.
+ROLES_FOR_LARGER_ORGANIZATIONS: frozenset[str] = frozenset({"director"})
+
+
+def one_person_may_do_and_approve(
+    *, duties_cannot_be_separated: bool, actor_is_owner: bool
+) -> bool:
+    """May a single person perform an act *and* provide its approval?
+
+    Normally no: the pairs in `SEGREGATION_OF_DUTIES` exist because the person
+    who takes money should not be the one who signs off that it was taken
+    correctly. Two cases answer yes.
+
+    The **owner** has always been exempt (ADR-018). A single-owner MChJ has
+    nobody else to delegate approval to, and refusing would not produce a
+    second person — it would produce a drawer nobody can close.
+
+    An organization that has **declared it is too small to separate duties**
+    is exempt for the same reason, one step further out. A clinic run by two
+    or three family members cannot staff both sides of a control, and the
+    honest response is to say so once, record who said it and when, and mark
+    every act that relies on it — not to leave a control in place that gets
+    worked around by sharing a login, which is the outcome that actually
+    destroys the audit trail.
+
+    The declaration never widens *who may act*: a permission is still
+    required for every operation, and the relaxation only removes the
+    requirement that the approver be a **different** person. That is the part
+    a small clinic cannot satisfy; everything else still applies.
+    """
+    return duties_cannot_be_separated or actor_is_owner
 
 SYSTEM_ROLES: tuple[RoleDefinition, ...] = (
     RoleDefinition(
@@ -411,12 +456,21 @@ def is_write_permission(code: str) -> bool:
     return code.endswith(_WRITE_SUFFIXES) or code == "banking.reconcile"
 
 
-def check_role_permission_set(role_code: str, permission_codes: set[str]) -> list[str]:
+def check_role_permission_set(
+    role_code: str,
+    permission_codes: set[str],
+    *,
+    duties_cannot_be_separated: bool = False,
+) -> list[str]:
     """Return the reasons `permission_codes` may not be held by one role.
 
     An empty list means the combination is acceptable. The owner role is
     exempt from segregation of duties: a single-owner MChJ has nobody else to
     delegate approval to, and the audit trail is what makes that reviewable.
+    An organization that has declared itself too small to separate duties is
+    exempt on the same grounds — see `one_person_may_do_and_approve`. The
+    read-only and unknown-permission checks are **not** relaxed by it: those
+    are not about having enough people.
     """
     problems: list[str] = []
     unknown = sorted(permission_codes - ALL_PERMISSION_CODES)
@@ -431,7 +485,10 @@ def check_role_permission_set(role_code: str, permission_codes: set[str]) -> lis
                 f"{', '.join(writes)}"
             )
 
-    if role_code != "owner":
+    if not one_person_may_do_and_approve(
+        duties_cannot_be_separated=duties_cannot_be_separated,
+        actor_is_owner=role_code == "owner",
+    ):
         for left, right, reason in SEGREGATION_OF_DUTIES:
             if left in permission_codes and right in permission_codes:
                 problems.append(f"{reason} ({left} + {right})")

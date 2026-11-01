@@ -2,7 +2,7 @@
 
 ## Current state
 
-**463 backend tests and 25 frontend tests: 461 passed, 2 skipped
+**524 backend tests and 43 frontend tests: 522 passed, 2 skipped
 deliberately, 0 failed** (the two skips are explained below). Verified counts,
 from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 
@@ -16,6 +16,7 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 | `tests/accounting/test_reports_and_policy.py` | 28 | Trial balance, statements, policy versioning and supersession, discarding a draft, workbook-derived default policy |
 | `tests/sales/test_billing.py` | 31 | Invoicing, partial payment, over-allocation, advances, refunds |
 | `tests/sales/test_debt_and_advances.py` | 22 | Patient debt and advances; the two ADR-038 ledger regressions; write-off; concurrent allocation |
+| `tests/clinic/test_duplicate_review.py` | 26 | Nothing merges on matching alone; both records stay live until somebody decides; the queue carries both records; which record a merge keeps; a settled pair is not raised again; the superseded record is kept and audited (ADR-042) |
 | `tests/clinic/test_payment_validation.py` | 38 | The four payment scenarios, the derived remaining balance, overpayment at service *and* database level, duplicate submission, two concurrency races, and a cash refund moving the drawer and the ledger together (ADR-040) |
 | `tests/sales/test_receivables.py` | 7 | Ageing buckets, cut-off dates, payments reducing the aged amount |
 | `tests/cash/test_sessions.py` | 31 | Sessions, the daily close, discrepancies, deposits, drawer-ledger agreement |
@@ -29,11 +30,14 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 | `tests/security/test_authorization.py` | 18 | Least privilege, escalation attempts, SoD enforcement |
 | `tests/security/test_tenant_isolation.py` | 11 | Cross-tenant access, at API, service and database level |
 | `tests/security/test_audit_integrity.py` | 11 | Append-only enforcement, redaction |
+| `tests/security/test_duty_separation.py` | 25 | The one-person-may-approve rule and its limits; the declaration and its audit record; closing a short till and refunding your own takings, with and without it; combined responsibilities on one person (ADR-041) |
+| `tests/security/test_permission_delivery.py` | 10 | That a permission in the code reaches the database: the catalogue is declared and frozen, every system role's grants match its definition both ways, and migration 0011's frozen list matches the catalogue it delivers (ADR-043) |
 | `tests/test_module_boundaries.py` | 9 | Architecture: no cycles, no reach-ins |
 
 | Frontend suite | Tests | Covers |
 | --- | --- | --- |
 | `src/lib/money.test.ts` | 25 | Exact decimal arithmetic on `bigint` minor units; the four payment scenarios as the panel computes them; amounts a float would get wrong |
+| `src/lib/patientIdentity.test.ts` | 18 | Comparing two patient records: what must and must not count as a difference — case, spacing and telephone formatting are not differences, a blank is *missing* rather than conflicting, and the screen shows the original spelling |
 
 **Two tests skip, and say why.** `test_a_written_off_bill_takes_no_payment`
 and `test_a_written_off_debt_owes_nothing_collectible`, both in

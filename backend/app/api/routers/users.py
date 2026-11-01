@@ -8,8 +8,15 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import AuditDep, DbSession, OrgCtx, require_permissions
+from app.api.deps import (
+    AuditDep,
+    DbSession,
+    DutySeparation,
+    OrgCtx,
+    require_permissions,
+)
 from app.core.errors import NotFound
+from app.core.permissions import ROLES_FOR_LARGER_ORGANIZATIONS
 from app.core.tenancy import scoped
 from app.modules.identity.models import Membership, Role, User
 from app.modules.identity.schemas import (
@@ -167,8 +174,18 @@ async def deactivate_member(
     response_model=list[RoleResponse],
     dependencies=[Depends(require_permissions("identity.role.read"))],
 )
-async def list_roles(context: OrgCtx, db: DbSession, audit: AuditDep) -> list[RoleResponse]:
-    """Roles available in this organization: the system set plus its own."""
+async def list_roles(
+    context: OrgCtx, db: DbSession, audit: AuditDep, duties_combined: DutySeparation
+) -> list[RoleResponse]:
+    """Roles available in this organization: the system set plus its own.
+
+    Each one says whether it is worth offering here. An organization that has
+    declared it cannot separate duties is too small to have a layer of
+    management in it, and `director` is the only role whose combination with
+    another trips a control — so offering it produces nothing but a refusal
+    the owner has to read and dismiss (ADR-041). It stays listed, and stays
+    grantable over the API, for an organization that grows into it.
+    """
     organization_id = context.require_organization()
     stmt = (
         select(Role)
@@ -187,6 +204,9 @@ async def list_roles(context: OrgCtx, db: DbSession, audit: AuditDep) -> list[Ro
             description=r.description,
             is_system=r.is_system,
             is_read_only=r.is_read_only,
+            offered_for_assignment=not (
+                duties_combined and r.code in ROLES_FOR_LARGER_ORGANIZATIONS
+            ),
             permission_codes=sorted(link.permission_code for link in r.permissions),
         )
         for r in roles

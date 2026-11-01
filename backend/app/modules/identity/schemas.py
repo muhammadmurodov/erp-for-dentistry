@@ -130,4 +130,9 @@ class RoleResponse(BaseModel):
     description: str | None
     is_system: bool
     is_read_only: bool
+    #: False for a role this organization has no use for — a middle-management
+    #: role in a three-person clinic. Still grantable over the API; the
+    #: assignment screen simply does not offer it, so the owner is never
+    #: shown a choice whose only effect is a refusal (ADR-041).
+    offered_for_assignment: bool = True
     permission_codes: list[str]
