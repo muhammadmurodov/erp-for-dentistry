@@ -162,7 +162,7 @@ async def register_patient(
 @router.get(
     "/patients/{patient_id}",
     response_model=PatientDetail,
-    dependencies=[Depends(require_permissions("clinic.patient.read", "sales.invoice.read"))],
+    dependencies=[Depends(require_permissions("clinic.patient.read"))],
 )
 async def patient_detail(
     patient_id: uuid.UUID,
@@ -175,6 +175,14 @@ async def patient_detail(
     The debt comes from the sales service. Nothing on this page is a stored
     balance, which is why no screen can show a figure the ledger disagrees
     with.
+
+    **The money half needs `sales.invoice.read` and is omitted without it.**
+    The page used to require both permissions, which refused the dentist —
+    who may read a patient and record treatment, but not read invoices — and
+    so put the entire clinical workflow out of reach of a browser. Filtering
+    the response grants nobody anything: a caller without the sales
+    permission simply gets `balance: null` and no invoice rows, exactly as
+    the dashboard withholds what it may not show (ADR-044).
     """
     organization_id = context.require_organization()
     patients = PatientService(db, audit)
@@ -183,16 +191,23 @@ async def patient_detail(
     settlement = SettlementService(db, audit)
 
     patient = await patients.get(organization_id=organization_id, patient_id=patient_id)
-    rows: list[PatientInvoiceRow] = []
-    balance = PatientBalance(
-        customer_id=None,
-        invoiced=ZERO,
-        paid=ZERO,
-        outstanding=ZERO,
-        advances_available=ZERO,
-        written_off=ZERO,
-    )
-    if patient.customer_id is not None:
+
+    # Withheld rather than zeroed: a dentist shown `0 UZS outstanding` would
+    # reasonably tell the patient they owe nothing.
+    may_read_money = context.has("sales.invoice.read")
+    rows: list[PatientInvoiceRow] | None = None
+    balance: PatientBalance | None = None
+    if may_read_money:
+        rows = []
+        balance = PatientBalance(
+            customer_id=None,
+            invoiced=ZERO,
+            paid=ZERO,
+            outstanding=ZERO,
+            advances_available=ZERO,
+            written_off=ZERO,
+        )
+    if may_read_money and patient.customer_id is not None:
         figures = await billing.customer_balance(
             organization_id=organization_id, customer_id=patient.customer_id
         )

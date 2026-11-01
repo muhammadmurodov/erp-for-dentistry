@@ -77,13 +77,15 @@ MODULES: tuple[ModuleInfo, ...] = (
             "patient registration with duplicate review",
             "duplicate review queue: compare two records and decide",
             "patient account: debt, advances and bills",
+            "clinical record: visits, per-tooth work in FDI notation, findings",
+            "completing treatment, and cancelling it with a reason",
+            "drafting an invoice from completed treatment, once per item",
             "payment: cash, card, advances, with a derived remaining balance",
-            "drafting an invoice from completed treatment",
         ),
         missing_features=(
             "appointment scheduling screen",
-            "clinical record screen: encounters, teeth, findings",
             "treatment plan screen",
+            "correcting a completed item from the screen (API only)",
         ),
     ),
     ModuleInfo(

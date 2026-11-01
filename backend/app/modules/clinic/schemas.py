@@ -152,12 +152,20 @@ class PatientDetail(BaseModel):
     """The patient page: who they are, what they owe, what is outstanding.
 
     Deliberately free of clinical content so that the page a cashier opens to
-    take a payment does not also show them a diagnosis.
+    take a payment does not also show them a diagnosis. The clinical record
+    is a separate request behind `clinic.clinical.read`.
+
+    **The money half is optional**, and `null` where the caller may not read
+    it. A dentist holds `clinic.patient.read` and not `sales.invoice.read`:
+    before this, the page refused them outright and the clinical record was
+    unreachable from a browser, which made the whole treatment workflow
+    API-only. Withholding the figures costs the dentist nothing they are
+    meant to have, and refusing the page cost them everything.
     """
 
     patient: PatientSummary
-    balance: PatientBalance
-    invoices: list[PatientInvoiceRow] = []
+    balance: PatientBalance | None = None
+    invoices: list[PatientInvoiceRow] | None = None
     #: Completed work not yet on any invoice.
     billable_items: int = 0
     open_duplicate_reviews: int = 0

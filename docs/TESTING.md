@@ -2,7 +2,7 @@
 
 ## Current state
 
-**524 backend tests and 43 frontend tests: 522 passed, 2 skipped
+**543 backend tests and 70 frontend tests: 541 passed, 2 skipped
 deliberately, 0 failed** (the two skips are explained below). Verified counts,
 from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 
@@ -38,6 +38,7 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 | Frontend suite | Tests | Covers |
 | --- | --- | --- |
 | `src/lib/money.test.ts` | 25 | Exact decimal arithmetic on `bigint` minor units; the four payment scenarios as the panel computes them; amounts a float would get wrong |
+| `src/lib/fdi.test.ts` | 21 | Tooth numbers and surfaces: which numbers are teeth in FDI notation, that an empty tooth box is not an error, that `om` and `MO` are one filling, and that a chart reads outwards from the midline rather than numerically |
 | `src/lib/dashboard.test.ts` | 27 | Which tiles a person sees, with what emphasis and where they lead; that a withheld figure is never rendered as zero; that no quick action is offered without both the permission and a screen behind it |
 | `src/lib/patientIdentity.test.ts` | 18 | Comparing two patient records: what must and must not count as a difference — case, spacing and telephone formatting are not differences, a blank is *missing* rather than conflicting, and the screen shows the original spelling |
 

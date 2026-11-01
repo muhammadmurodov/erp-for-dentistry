@@ -11,11 +11,11 @@ asserts nothing beyond Phase 1 reports itself as `available`.
 Every figure below was produced by running the command shown, not estimated.
 
 ```
-backend:  522 passed, 2 skipped in 122.31s   .venv/bin/python -m pytest tests
+backend:  541 passed, 2 skipped in 121.64s   .venv/bin/python -m pytest tests
 lint:     All checks passed!       .venv/bin/ruff check app tests alembic
 schema:   No new upgrade operations detected.   alembic check
 migrate:  downgrade base -> upgrade head: clean (every test run)
-frontend: 43 passed (43)           npm test
+frontend: 70 passed (70)           npm test
           built in 1.15s           npm run build
           0 problems               npm run lint
           0 errors                 npm run typecheck
@@ -381,18 +381,68 @@ to `(organization_id, payment_id, kind)`, cash is refunded from an open session
 through `POST /cash/sessions/{id}/refunds`, and the generic sales refund route
 now refuses a cash payment and says where to go (ADR-040).
 
+## Phase 3c · The clinical screens · Built
 
+A dentist can now record a visit from a browser. Everything behind this was
+already built and tested; what was missing was somewhere to type.
 
+**What works.** Open a visit against a patient with a complaint; record work
+one row per tooth, in FDI notation, with surfaces and a finding; mark an item
+finished; cancel one with a mandatory reason; finish the visit with clinical
+notes; and draft a bill from the finished work. Tooth numbers are validated
+at the keystroke against the same ranges the backend enforces — permanent
+11–18, 21–28, 31–38, 41–48 and deciduous 51–55, 61–65, 71–75, 81–85 — and an
+empty tooth box is accepted, because a consultation belongs to no tooth.
 
+**A visit does not imply a bill.** Recording work does not price it. Only a
+`COMPLETED` item is billable, and billing drafts an invoice rather than
+issuing one: issuing recognises the revenue and keeps its own permission, so
+the dentist who did the work does not decide the clinic has earned it.
 
+**The same work cannot be billed twice.** An item carries the invoice line it
+produced and leaves the billable list once billed; the list is never cached,
+because a stale one would offer work another screen has already invoiced.
 
+### The access policy, provisionally
 
+While `OPEN_QUESTIONS.md` C1 is unanswered, clinical content sits behind
+`clinic.clinical.read`: the dentist and the owner see findings, teeth and
+notes; reception and the cashier see a patient, their account and their
+bills, and no clinical panel at all. This is the strict reading, so any later
+decision loosens it, which is the safe direction.
 
+**One change was needed to make that work**, and it is a correction rather
+than a relaxation. `GET /clinic/patients/{id}` required *both*
+`clinic.patient.read` and `sales.invoice.read`, so it refused the dentist
+outright — who may read a patient and record treatment but not read invoices
+— which put the entire clinical workflow out of reach of a browser. The
+money half of that response is now withheld (`balance: null`, no invoice
+rows) rather than the whole page refused, exactly as the dashboard withholds
+what it may not show (ADR-044). Nobody gained a permission.
 
+The cashier, who may raise a bill but may not read a finding, sees **how
+many** finished treatments are waiting and bills all of them; the itemised
+list with findings stays behind the clinical permission.
 
+### Verified end to end in a browser
 
+`frontend/e2e/patient-to-payment.cjs` drives the whole journey as the three
+people who do it — 23 steps, 0 problems: reception registers and finds a
+patient and is refused the clinical record; the dentist opens a visit,
+records tooth 36 MO with a finding, has tooth 99 refused, marks it finished,
+finishes the visit, and is refused billing; the cashier bills it; the same
+work cannot be billed again; issuing moves 600 000 to revenue and the
+receivable; an overpayment is blocked by the form; a mixed 200 000 cash and
+400 000 card settles it; a settled bill refuses more money; and the ledger
+ends with revenue recognised once, the receivable at zero and the cash
+exactly what went into the drawer. Driven in all three languages and at
+phone width.
 
+### Not built
 
+Appointments have no screen (the dashboard counts them). Treatment plans have
+no screen. Correcting a completed item is API-only. These are declared in the
+module registry and visible on Settings → System status.
 
 ## The dashboard · Rebuilt around the clinic's day
 

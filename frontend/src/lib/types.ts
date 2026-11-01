@@ -763,6 +763,51 @@ export interface DuplicateReviewDetail {
   survivor_id: string
 }
 
+export type EncounterStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED'
+
+/** One visit to the chair. */
+export interface Encounter {
+  id: string
+  code: string
+  patient_id: string
+  appointment_id: string | null
+  dentist_user_id: string | null
+  occurred_on: string
+  status: EncounterStatus
+  complaint: string | null
+  clinical_notes: string | null
+  body_weight_kg: string | null
+  completed_at: string | null
+}
+
+export type TreatmentItemStatus =
+  | 'PLANNED'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'CORRECTED'
+
+/** One piece of work, on one tooth. `COMPLETED` is the only billable state. */
+export interface TreatmentItem {
+  id: string
+  patient_id: string
+  encounter_id: string | null
+  plan_id: string | null
+  service_id: string
+  dentist_user_id: string | null
+  tooth_number: number | null
+  tooth_surfaces: string | null
+  finding: string | null
+  status: TreatmentItemStatus
+  planned_on: string | null
+  completed_on: string | null
+  quantity: string
+  unit_price: string | null
+  /** Set once the item reaches an invoice. The money lives there, not here. */
+  invoice_line_id: string | null
+  corrected_by_item_id: string | null
+}
+
 export interface PatientBalance {
   customer_id: string | null
   invoiced: string
@@ -800,8 +845,9 @@ export interface PatientInvoiceRow {
 
 export interface PatientDetail {
   patient: PatientSummary
-  balance: PatientBalance
-  invoices: PatientInvoiceRow[]
+  /** `null` where the reader may not see money — a dentist, for instance. */
+  balance: PatientBalance | null
+  invoices: PatientInvoiceRow[] | null
   billable_items: number
   open_duplicate_reviews: number
 }

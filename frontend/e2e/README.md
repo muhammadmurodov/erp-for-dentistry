@@ -15,6 +15,7 @@ they can be re-run after a change instead of re-done:
 | `policy.cjs` | accounting policy versions and rules | the owner |
 | `clinic.cjs` | patients, the account, taking a payment | reception, then the cashier |
 | `small-clinic.cjs` | the duty-separation declaration and the duplicate-patient queue | the owner, the cashier, then reception |
+| `patient-to-payment.cjs` | the whole journey: register, examine, record teeth, finish, bill, pay | reception, the dentist, then the cashier |
 
 Between them they have found fifteen defects, two of them in code that had
 been passing its unit tests since Phase 2, and two that no test run could have

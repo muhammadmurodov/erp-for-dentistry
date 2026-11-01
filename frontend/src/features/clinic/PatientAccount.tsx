@@ -17,6 +17,8 @@ import {
 } from '@/components/ui'
 import type { SettlementStatus } from '@/lib/types'
 import { PaymentPanel } from './PaymentPanel'
+import { ClinicalPanel } from './ClinicalPanel'
+import { BillingBridge } from './BillingBridge'
 
 /**
  * One patient's account: who they are, what they owe, and their bills.
@@ -107,6 +109,7 @@ export function PatientAccount({
         />
       </Card>
 
+      {balance ? (
       <Card>
         <CardHeader title={t.clinic.balanceHeading} />
         <DescriptionList
@@ -140,7 +143,17 @@ export function PatientAccount({
           ]}
         />
       </Card>
+      ) : null}
 
+      <ClinicalPanel patientId={patientId} />
+
+      <BillingBridge
+        patientId={patientId}
+        billableCount={detail.data.billable_items}
+        onBilled={() => void detail.refetch()}
+      />
+
+      {invoices ? (
       <Card>
         <CardHeader title={t.clinic.invoicesHeading} />
         {invoices.length === 0 ? (
@@ -190,6 +203,7 @@ export function PatientAccount({
           </Table>
         )}
       </Card>
+      ) : null}
 
       {payingInvoiceId ? (
         <PaymentPanel

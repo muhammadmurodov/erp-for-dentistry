@@ -2,7 +2,9 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { api } from './api'
 import type {
   DuplicateReviewDetail,
+  Encounter,
   TodayView,
+  TreatmentItem,
   Account,
   AccountingPolicy,
   BankAccount,
@@ -95,6 +97,9 @@ export const queryKeys = {
   patient: (id: string) => ['clinic', 'patient', id] as const,
   duplicateReviews: ['clinic', 'duplicate-reviews'] as const,
   today: ['clinic', 'today'] as const,
+  encounters: (patientId: string) => ['clinic', 'encounters', patientId] as const,
+  treatments: (patientId: string) => ['clinic', 'treatments', patientId] as const,
+  billable: (patientId: string) => ['clinic', 'billable', patientId] as const,
   settlement: (invoiceId: string) => ['clinic', 'settlement', invoiceId] as const,
   settlementHistory: (invoiceId: string) =>
     ['clinic', 'settlement', invoiceId, 'history'] as const,
@@ -503,6 +508,48 @@ export function useDuplicateReviews(
     queryFn: () =>
       api.get<DuplicateReviewDetail[]>('/clinic/duplicate-reviews'),
     enabled,
+  })
+}
+
+/** A patient's visits, newest first. Behind `clinic.clinical.read`. */
+export function useEncounters(
+  patientId: string | null,
+  enabled: boolean,
+): UseQueryResult<Encounter[]> {
+  return useQuery({
+    queryKey: queryKeys.encounters(patientId ?? ''),
+    queryFn: () => api.get<Encounter[]>(`/clinic/patients/${patientId}/encounters`),
+    enabled: Boolean(patientId) && enabled,
+  })
+}
+
+/** Every piece of work recorded for a patient, whatever its state. */
+export function useTreatments(
+  patientId: string | null,
+  enabled: boolean,
+): UseQueryResult<TreatmentItem[]> {
+  return useQuery({
+    queryKey: queryKeys.treatments(patientId ?? ''),
+    queryFn: () => api.get<TreatmentItem[]>(`/clinic/patients/${patientId}/treatments`),
+    enabled: Boolean(patientId) && enabled,
+  })
+}
+
+/**
+ * Completed work with no invoice line: what the clinic has done and not
+ * charged for. Never cached beyond the moment — billing it is what makes it
+ * disappear, and a stale list would offer to bill the same tooth twice.
+ */
+export function useBillable(
+  patientId: string | null,
+  enabled: boolean,
+): UseQueryResult<TreatmentItem[]> {
+  return useQuery({
+    queryKey: queryKeys.billable(patientId ?? ''),
+    queryFn: () => api.get<TreatmentItem[]>(`/clinic/patients/${patientId}/billable`),
+    enabled: Boolean(patientId) && enabled,
+    staleTime: 0,
+    gcTime: 0,
   })
 }
 
