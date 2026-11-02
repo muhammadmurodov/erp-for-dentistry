@@ -1,6 +1,6 @@
 # Implementation status
 
-**Last updated:** 2026-10-31 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete on the money side, with no clinical screens yet.**
+**Last updated:** 2026-11-02 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete on the money side, with the clinical screens, the appointment book and partial refunds built and driven in a browser.**
 
 The authoritative record of what works. The application serves the same
 information from `GET /api/v1/platform/modules`, and an integration test
@@ -11,16 +11,18 @@ asserts nothing beyond Phase 1 reports itself as `available`.
 Every figure below was produced by running the command shown, not estimated.
 
 ```
-backend:  541 passed, 2 skipped in 121.64s   .venv/bin/python -m pytest tests
+backend:  611 passed, 2 skipped in 144.62s   .venv/bin/python -m pytest tests
 lint:     All checks passed!       .venv/bin/ruff check app tests alembic
 schema:   No new upgrade operations detected.   alembic check
 migrate:  downgrade base -> upgrade head: clean (every test run)
-frontend: 70 passed (70)           npm test
-          built in 1.15s           npm run build
+frontend: 129 passed (129)         npm test
+          built in 1.14s           npm run build
           0 problems               npm run lint
           0 errors                 npm run typecheck
 api e2e:  18 passed, 0 failed      HTTP checks against the running API
           Phase 3d: 6 HTTP slice tests, in the suite above
+          Refunds, appointments and the till: 19 more HTTP slice
+          tests, in the suite above
 ui e2e:   Phase 1: 12 screens driven in Chrome, each inspected
           Phase 2: 11 accounting steps driven in Chrome, 0 console errors
           Phase 3: 10 sales steps driven in Chrome, 0 console errors
@@ -29,7 +31,9 @@ ui e2e:   Phase 1: 12 screens driven in Chrome, each inspected
           Phase 3c: 31 clinic steps driven in Chrome, 0 console errors
           Policy:   10 policy steps driven in Chrome, 0 console errors
           Small clinic: 28 steps driven in Chrome, 0 console errors
-                    — all four kept as scripts under `frontend/e2e/`,
+          Refunds:  14 refund steps driven in Chrome, 0 console errors
+          Appointments: 15 steps driven in Chrome, 0 console errors
+                    — all kept as scripts under `frontend/e2e/`,
                       re-runnable, 0 problems reported on a repeat run
 sql e2e:  12 database invariants verified by raw SQL with the service bypassed
           Phase 3d: 9 more, same method
@@ -226,8 +230,9 @@ once**. The overpayment is a liability in account 6310 — the statutory
 `POST /cash/sessions/{id}/refunds` reverses the payment and records the money
 leaving this drawer in one transaction; the generic sales refund route refuses
 a cash payment and says so (ADR-040). The session's summary already reports
-refunds alongside receipts, expenses and deposits, but **no screen issues
-one** — it is an API-only operation for now, listed under *Known gaps*.
+refunds alongside receipts, expenses and deposits, and since the refund
+dialog was built it is also where one is issued — in full, or part of one
+(ADR-045).
 
 ### The worked example
 
@@ -312,15 +317,16 @@ ignore, reopen).
 
 ### Clinic endpoints
 
-25 routes under `/api/v1/clinic`: the day's summary for the dashboard,
+27 routes under `/api/v1/clinic`: the day's summary for the dashboard,
 patients (search, register, detail, edit,
-merge), duplicate reviews (list, resolve), appointments (list, book, change
-status), encounters (open, complete, list for a patient), treatment items
+merge), duplicate reviews (list, resolve), appointments (list, book,
+reschedule, change status) and the dentists one may be booked with,
+encounters (open, complete, list for a patient), treatment items
 (record, list, complete, cancel, correct), treatment plans (create), billing
 (billable items, draft an invoice), and settlement (the remaining balance,
 take a payment, payment history).
 
-**114 routes in the API overall** — 112 under `/api/v1`, plus the two
+**117 routes in the API overall** — 115 under `/api/v1`, plus the two
 health checks. Counted from the generated OpenAPI document, one per
 path-and-method.
 
@@ -440,9 +446,9 @@ phone width.
 
 ### Not built
 
-Appointments have no screen (the dashboard counts them). Treatment plans have
-no screen. Correcting a completed item is API-only. These are declared in the
-module registry and visible on Settings → System status.
+Treatment plans have no screen. Correcting a completed item is API-only.
+These are declared in the module registry and visible on Settings → System
+status. Appointments used to head this list; the book is built, below.
 
 ## The dashboard · Rebuilt around the clinic's day
 
@@ -537,7 +543,83 @@ it found it, declaration included.
 **It found two defects, and neither could have been found any other way** —
 numbers 45 and 46 below. One of them had been shipped a commit earlier.
 
-Issuing a cash refund still has no screen at all; see *Known gaps*.
+## Giving part of a payment back · Complete
+
+Refunding a payment in full was the only refund the system could record, and
+it is not the refund this clinic gives. The commonest one by a distance is
+the patient who hands over 800 000 for a bill of 600 000 and wants the
+200 000 back. There was no way to record it, which means it either did not
+happen at the desk or it happened off the books.
+
+**Each refund is now a record of its own** (ADR-045), and what is left
+refundable is derived — the payment, less what is applied to bills, less what
+has already been handed back — so a second refund can follow the first and
+neither needs a stored remainder to disagree with. Only the unapplied part
+may be given back: money applied to an issued invoice is revenue against work
+the clinic has billed for, and handing it back without crediting the invoice
+would refund the patient and leave them owing for the same treatment. That
+case needs a credit note, which the clinic has no approved rule for, so the
+service refuses and says which instrument is missing.
+
+**The ledger entry is the advance posting, reversed** — the same policy
+rule's two accounts the other way round. Nothing new is mapped, no new rule
+is needed, and it therefore works against a policy version that predates the
+feature.
+
+**The drawer and the books move together.** A cash refund leaves the open
+till by the same movement ADR-040 built, and migration `0012` turns that
+movement's uniqueness rule into a partial index so several partial refunds of
+one payment are allowed while one refund can still only be paid out once. The
+day's takings are reported net of the day's refunds, because a tile reading
+"taken today, cash" that ignored money handed back would not agree with the
+drawer — and the drawer is the one figure a cashier can check by counting.
+
+**There is now a screen**, which there was not: `RefundDialog`, reached from
+the receipt on the cash page. It reads `GET /payments/{id}/refundability`
+before it offers anything, so the figure the cashier sees is the figure the
+service will enforce, and it refuses to submit more than there is. The
+arithmetic is in `lib/refund.ts` on `bigint` minor units, with 17 tests.
+
+**Verified in a real Chrome** as the cashier, kept as `frontend/e2e/refunds.cjs`:
+take 800 000 for a 600 000 bill, read what the dialog says is refundable, try
+to take more than there is, hand back part of it twice, then check the three
+things no page can tell you on its own — that the till's expected cash fell
+by exactly what went out, that the ledger agrees, and that the bill the
+patient really did pay is still settled. It opens and closes its own drawer.
+
+## The appointment book · Built
+
+Reception can book the day from a browser: who is coming in, who has arrived,
+who is still expected. It was the last part of the clinic that the dashboard
+counted but no screen could change.
+
+**The day and the hour are the clinic's own** (ADR-046). `date.today()` is
+the container's day, which is UTC; the clinic is five hours ahead, and
+between seven in the evening and midnight those are different dates — which
+is exactly when a dental clinic is still seeing patients. Business dates now
+come from `app.core.clock`; instants stay UTC. An appointment's time of day
+is a local `Time`, not a timestamp, because the clinic books "Tuesday at
+three" and that is not an instant.
+
+**One dentist cannot be in two chairs** (ADR-047). Two receptionists booking
+the same hour at the same moment is serialised by an advisory lock on the
+dentist and the day — neither transaction can see the other's uncommitted
+row, and there is no row to lock — so the second is refused with a 409 that
+names the booking it clashed with. The form warns before it sends; the server
+refuses regardless. A booking with no hour claims no chair.
+
+**No appointment status posts anything.** Confirmed, arrived, finished,
+cancelled, no-show: none is an accounting event, and a test asserts a day's
+worth of them leaves the ledger untouched. The clinic's own register shows
+several attendances a week that produce no revenue.
+
+**Verified in a real Chrome** as reception and then the cashier, kept as
+`frontend/e2e/appointments.cjs`: book into a free hour, provoke the clash and
+read both the warning and the refusal, confirm and admit a patient, move a
+booking to the next day, cancel one with a reason, check the dashboard counts
+what was booked, and check that the cashier reads the day and is offered no
+control that changes it. It finds its own free hour rather than assuming one
+and gives the hours back at the end, so it can be run twice in a row.
 
 ## Phases 4–7 · Not started
 
@@ -553,23 +635,21 @@ Issuing a cash refund still has no screen at all; see *Known gaps*.
 
 Stated plainly rather than left to be discovered.
 
-**Frontend tests cover one module.** `lib/money.ts` has 25 cases, because it
-does arithmetic on money and that is where a float would do real damage. No
-component tests: the payment panel's disabling rules and the forms are covered
-only by the type check, the lint and the build.
+**Still no component tests.** Six frontend modules are now tested —
+`money`, `fdi`, `dashboard`, `patientIdentity`, `refund` and `appointments`,
+129 cases between them — but every one of them tests a pure function. The
+rule a component applies is covered; the component applying it is covered
+only by the type check, the lint, the build and a browser pass.
 
-**Issuing a cash refund has no screen.** The route, the service, the drawer
-movement and the ledger reversal are built, tested and audited (ADR-040), and
-the cash page displays refunds in the session summary, but giving money back
-still has to be done over the API. It belongs on the cash register screen,
-next to the expense and deposit controls.
+**A treatment plan has no screen.** The encounter, the per-tooth record and
+the appointment book are built. Planning future work, and correcting a
+completed item, are still API-only.
 
-**No clinical screens.** See Phase 3c above. The routes and services are
-there and tested; the UI is the patient list, the patient account, the payment
-panel and the duplicate-review queue. What a dentist cannot yet do from a
-browser is record a tooth: the encounter, the per-tooth record and the
-treatment plan have no screens, and `OPEN_QUESTIONS.md` C1 decides what each
-may show before one can be drawn.
+**Crediting an issued invoice has no instrument.** Partial refunds give back
+only money the patient has not spent (ADR-045). Giving back money already
+applied to an issued bill needs a credit note, which has no approved rule —
+the service refuses and names what is missing, rather than guessing a
+posting.
 
 **No automated browser test in CI.** The UI has been driven in a real Chrome
 and inspected screen by screen (see `TESTING.md`), but that was a manual run.
@@ -864,22 +944,59 @@ drives a browser against a real database rather than trusting a green run.
     keeps `90 123 45 67` finding `+998901234567` and stops a two-digit query
     matching most of the register.
 
+## Found by running the refund and appointment passes in a browser
+
+Three defects. The first two are the same mistake in two modules, and both
+turned a refusal the code was written to explain into a 500 with a request
+id — the kind of fault that is invisible to a service-level test, because
+inside one transaction the attribute being read is still loaded.
+
+47. **Opening the till twice answered a 500, not a 409.** The conflict
+    handler built its message from `register.code` *after* the failed flush.
+    A failed flush leaves the session needing a rollback, so touching an
+    expired attribute raised `PendingRollbackError` instead. The message
+    existed, was correct, and never arrived. The value is now read before the
+    flush, and `tests/integration/test_duplicate_open_session_slice.py` keeps
+    it honest — deliberately an integration test, because the service-level
+    test cannot see this.
+48. **The same mistake in allocation.** `payment.number` and
+    `invoice.number` were read inside the `IntegrityError` handler for a
+    double allocation, so applying the same payment to the same invoice
+    twice produced a 500 where a 409 was written.
+49. **Reception was offered an empty dentist picker.** The appointment form
+    listed dentists from `GET /users`, which needs `identity.user.read`.
+    Reception does not hold it — and reception is the only role that books
+    anything, so the feature was unusable by precisely the people it was
+    built for, while working perfectly for the owner every test signed in
+    as. Widening reception's permissions would have been the wrong fix: a
+    receptionist has no business reading staff e-mail addresses and sign-in
+    history. `GET /clinic/dentists` answers a name and an id behind
+    `clinic.appointment.read` instead (ADR-047).
+
+The appointments pass also found two faults in itself, worth recording
+because they are the ones that make a verification script quietly useless: it
+booked a fixed hour, so its second run collided with its first and reported
+the clash rule working as a fault; and it probed for existing staff by trying
+to sign in as them, which spent the login rate limit on itself and then read
+the refusal as "that account does not exist". Both are fixed in the script —
+it finds a free hour, gives the hours back when it finishes, and reads the
+directory instead of guessing.
+
 ## Next step
 
-Phase 3 is complete, including the clinic module's financial half. In order:
+Phase 3 is complete, including the clinic module's financial half, the
+clinical screens, the appointment book and partial refunds. In order:
 
-1. **The clinical screens**: the encounter, the per-tooth record and the
-   treatment plan. The services and routes are built; what is still open is
-   `C1` (who may read clinical records), which decides what each screen may
-   show before it is drawn. The duplicate-review queue, which used to head
-   this list, is built (ADR-042).
-2. **Phase 6 (part) — statutory reports**: the balance sheet and P&L, blocked
+1. **Phase 6 (part) — statutory reports**: the balance sheet and P&L, blocked
    on `A2` and `A3`.
+2. **The treatment plan screen**, the last clinical screen with no UI, and
+   correcting a completed item, which is still API-only.
 3. **Promote the browser passes into CI**, with the stack as a service and
-   browsers cached. `frontend/e2e/banking.cjs`, `frontend/e2e/policy.cjs`,
-   `frontend/e2e/clinic.cjs` and `frontend/e2e/small-clinic.cjs` are the
-   passes kept as scripts rather than done by hand; between them they found
-   fifteen defects, and all four are re-runnable.
+   browsers cached. `banking.cjs`, `policy.cjs`, `clinic.cjs`,
+   `small-clinic.cjs`, `patient-to-payment.cjs`, `refunds.cjs` and
+   `appointments.cjs` under `frontend/e2e/` are the passes kept as scripts
+   rather than done by hand; between them they found eighteen defects, and
+   each is re-runnable against the same tenant.
 4. **Have an accountant review the workbook-derived policy.** It now has a
    screen to review it on, every rule carries its source note, and nothing
    else in `OPEN_QUESTIONS.md` A1/A4/A5 can be settled without that review.

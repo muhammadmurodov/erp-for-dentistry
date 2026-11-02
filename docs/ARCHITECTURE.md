@@ -23,7 +23,8 @@ the invariant at stake is "debits equal credits".
 │                 services own transactions and invariants.│
 ├──────────────────────────────────────────────────────────┤
 │ app/core        Config, database, money, permissions,    │
-│                 logging, errors, tenancy, context.       │
+│                 logging, errors, tenancy, context,       │
+│                 the clinic's clock (ADR-046).            │
 └──────────────────────────────────────────────────────────┘
 ```
 

@@ -26,6 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import clinic_today
 from app.core.errors import Conflict, NotFound, ValidationFailed
 from app.core.money import ZERO, quantize, to_amount
 from app.modules.accounting.enums import PostingPurpose, SourceKind
@@ -50,6 +51,7 @@ from app.modules.sales.models import (
     InvoiceLine,
     Payment,
     PaymentAllocation,
+    PaymentRefund,
     Service,
 )
 
@@ -104,6 +106,25 @@ class CustomerBalance:
     outstanding: Decimal
     unapplied_credit: Decimal
     written_off: Decimal = Decimal("0")
+
+
+@dataclass(frozen=True, slots=True)
+class Refundability:
+    """What of a payment may still be given back, and what already was.
+
+    `refundable` is the unapplied part less whatever has been refunded: money
+    the patient has not spent on a bill and the clinic has not yet handed
+    back. Money already applied to an issued invoice is **not** here — see
+    `BillingService.refund_advance`.
+    """
+
+    amount: Decimal
+    allocated: Decimal
+    refunded: Decimal
+    refundable: Decimal
+    currency: str
+    #: False once the payment is `REFUNDED`, or where nothing is left.
+    may_refund: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,7 +385,7 @@ class BillingService:
                     entry_id=entry.id,
                     reason=f"Invoice {invoice.number} voided: {reason.strip()}",
                     actor_user_id=actor_user_id,
-                    reversal_date=date.today(),
+                    reversal_date=clinic_today(),
                 )
 
         invoice.status = InvoiceStatus.VOID
@@ -421,7 +442,7 @@ class BillingService:
         if outstanding <= ZERO:
             raise Conflict(f"Invoice {invoice.number} has nothing outstanding to write off")
 
-        on = written_off_on or date.today()
+        on = written_off_on or clinic_today()
         policy = await self._policy_for(organization_id, on)
         rule = await self._posting.resolve_policy_rule(
             organization_id=organization_id,
@@ -643,6 +664,21 @@ class BillingService:
         if payment.status is PaymentStatus.REFUNDED:
             raise Conflict(f"Payment {payment.number} has already been refunded")
 
+        # A full refund reverses the original entry. Part of that money may
+        # already have been handed back by its own posting, and reversing the
+        # whole entry on top of that would pay it out twice. The remainder is
+        # refunded as a partial refund instead.
+        already_refunded = await self.refunded_from_payment(
+            organization_id=organization_id, payment_id=payment_id
+        )
+        if already_refunded > ZERO:
+            raise Conflict(
+                f"Payment {payment.number} has already been partly refunded "
+                f"({quantize(already_refunded, payment.currency)}), so it cannot be "
+                "refunded in full. Refund what is left instead.",
+                details={"already_refunded": str(already_refunded)},
+            )
+
         # Unapply first, and reverse each application's own entry. Reversing
         # only the payment entry left the advance-application entries
         # standing: account 6310 ended up with a debit balance — a negative
@@ -676,7 +712,7 @@ class BillingService:
                     entry_id=entry.id,
                     reason=f"Payment {payment.number} refunded: {reason.strip()}",
                     actor_user_id=actor_user_id,
-                    reversal_date=date.today(),
+                    reversal_date=clinic_today(),
                 )
 
         payment.status = PaymentStatus.REFUNDED
@@ -704,6 +740,270 @@ class BillingService:
             },
         )
         return payment
+
+    # ------------------------------------------------------- partial refunds
+
+    async def refunded_from_payment(
+        self, *, organization_id: uuid.UUID, payment_id: uuid.UUID
+    ) -> Decimal:
+        """How much of this payment has been handed back in partial refunds."""
+        stmt = select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+            PaymentRefund.organization_id == organization_id,
+            PaymentRefund.payment_id == payment_id,
+        )
+        return Decimal((await self._session.execute(stmt)).scalar_one() or 0)
+
+    async def list_refunds(
+        self, *, organization_id: uuid.UUID, payment_id: uuid.UUID
+    ) -> list[PaymentRefund]:
+        """Every partial refund of this payment, oldest first."""
+        stmt = (
+            select(PaymentRefund)
+            .where(
+                PaymentRefund.organization_id == organization_id,
+                PaymentRefund.payment_id == payment_id,
+            )
+            .order_by(PaymentRefund.refunded_on, PaymentRefund.number)
+        )
+        return list((await self._session.execute(stmt)).scalars())
+
+    async def refundability(
+        self, *, organization_id: uuid.UUID, payment_id: uuid.UUID
+    ) -> Refundability:
+        """What is left to give back, derived rather than stored.
+
+        The screen shows this before it offers a refund, so the cashier reads
+        the same figure the service will enforce.
+        """
+        payment = await self.get_payment(organization_id=organization_id, payment_id=payment_id)
+        allocated = await self.allocated_from_payment(
+            organization_id=organization_id, payment_id=payment_id
+        )
+        refunded = await self.refunded_from_payment(
+            organization_id=organization_id, payment_id=payment_id
+        )
+        refundable = quantize(payment.amount - allocated - refunded, payment.currency)
+        if refundable < ZERO:
+            refundable = ZERO
+        return Refundability(
+            amount=quantize(payment.amount, payment.currency),
+            allocated=quantize(allocated, payment.currency),
+            refunded=quantize(refunded, payment.currency),
+            refundable=refundable,
+            currency=payment.currency,
+            may_refund=payment.status is PaymentStatus.RECORDED and refundable > ZERO,
+        )
+
+    async def refund_advance(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        payment_id: uuid.UUID,
+        amount: Decimal,
+        reason: str,
+        refunded_on: date | None = None,
+        actor_user_id: uuid.UUID | None = None,
+        self_approved: bool = False,
+    ) -> PaymentRefund:
+        """Give part of a payment back, out of the part nobody has spent.
+
+        **Only the unapplied part.** Money applied to an issued invoice is
+        revenue the clinic has recognised against work it has billed for.
+        Handing that back without crediting the invoice would reopen the
+        invoice as a debt, so the patient would be refunded *and* still owe
+        for the same treatment. Crediting an issued invoice needs an approved
+        credit-note rule, which this clinic does not have yet
+        (`OPEN_QUESTIONS.md`), so this refuses and says which instrument is
+        needed rather than guessing one. Refunding a payment taken wholly in
+        error is the other path: `refund_payment`, which reverses everything.
+
+        **The ledger entry is the advance posting, reversed.** The money came
+        in as `advance_received_*` — debit cash, credit 6310, a liability the
+        clinic owes back. Handing it over discharges exactly that liability,
+        so the entry is the same policy rule's two accounts the other way
+        round. No new account mapping is invented and no new policy rule is
+        required, which also means this works on a database whose active
+        policy predates the feature (ADR-045).
+
+        `self_approved` is recorded, not enforced, as in `refund_payment`:
+        whether one person may both take money and give it back is decided at
+        the edge, where the duty-separation declaration is known (ADR-041).
+        """
+        if not reason or not reason.strip():
+            raise ValidationFailed("A refund requires a reason")
+
+        # Locked before the arithmetic: two cashiers refunding the same
+        # advance at the same moment would otherwise both read the same
+        # refundable amount and both pass the check below.
+        locked = (
+            await self._session.execute(
+                select(Payment)
+                .where(Payment.organization_id == organization_id, Payment.id == payment_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if locked is None:
+            raise NotFound("Payment not found")
+        payment = locked
+
+        if payment.status is PaymentStatus.REFUNDED:
+            raise Conflict(
+                f"Payment {payment.number} has already been refunded in full",
+                details={"status": payment.status.value},
+            )
+
+        amount = quantize(amount, payment.currency)
+        if amount <= ZERO:
+            raise ValidationFailed("A refund must be a positive amount")
+
+        allocated = await self.allocated_from_payment(
+            organization_id=organization_id, payment_id=payment_id
+        )
+        refunded = await self.refunded_from_payment(
+            organization_id=organization_id, payment_id=payment_id
+        )
+        refundable = quantize(payment.amount - allocated - refunded, payment.currency)
+        if refundable <= ZERO:
+            raise Conflict(
+                f"Payment {payment.number} has nothing left to refund: "
+                f"{quantize(allocated, payment.currency)} is applied to bills and "
+                f"{quantize(refunded, payment.currency)} has already been given back. "
+                "To give back money applied to a bill, the bill has to be credited.",
+                details={
+                    "amount": str(payment.amount),
+                    "allocated": str(allocated),
+                    "refunded": str(refunded),
+                },
+            )
+        if amount > refundable:
+            raise ValidationFailed(
+                f"Only {refundable} of payment {payment.number} can be refunded. "
+                f"{quantize(allocated, payment.currency)} is applied to bills and "
+                f"{quantize(refunded, payment.currency)} has already been given back.",
+                details={"refundable": str(refundable), "requested": str(amount)},
+            )
+
+        refund = PaymentRefund(
+            organization_id=organization_id,
+            number=await next_number(
+                self._session,
+                organization_id=organization_id,
+                name="payment_refund",
+                prefix="REF-",
+            ),
+            payment_id=payment_id,
+            amount=amount,
+            currency=payment.currency,
+            refunded_on=refunded_on or clinic_today(),
+            reason=reason.strip(),
+            refunded_by_user_id=actor_user_id,
+            self_approved=self_approved,
+        )
+        self._session.add(refund)
+        await self._session.flush()
+
+        await self._post_advance_refund(
+            organization_id=organization_id,
+            payment=payment,
+            refund=refund,
+            actor_user_id=actor_user_id,
+        )
+
+        self._audit.record(
+            events.REFUND_APPROVED,
+            organization_id=organization_id,
+            target_type="payment",
+            target_id=payment.id,
+            target_label=payment.number,
+            reason=refund.reason,
+            actor_user_id=actor_user_id,
+            business_event=f"payment_refund:{refund.id}",
+            new_values={
+                "refund": refund.number,
+                "amount": refund.amount,
+                "method": payment.method.value,
+                "remaining_refundable": quantize(refundable - amount, payment.currency),
+                "partial": True,
+                "self_approved": self_approved,
+            },
+        )
+        return refund
+
+    async def _post_advance_refund(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        payment: Payment,
+        refund: PaymentRefund,
+        actor_user_id: uuid.UUID | None,
+    ) -> None:
+        """The advance posting, the other way round. See `refund_advance`."""
+        policy = await self._policy_for(organization_id, refund.refunded_on)
+        rule = await self._posting.resolve_policy_rule(
+            organization_id=organization_id,
+            policy_id=policy.id,
+            operation_code=OPERATION_ADVANCE_BY_METHOD[payment.method],
+        )
+        await self._posting.post(
+            organization_id=organization_id,
+            request=PostingRequest(
+                entry_date=refund.refunded_on,
+                description=(
+                    f"Refund {refund.number} of payment {payment.number} "
+                    f"({payment.method.value.lower()})"
+                ),
+                source_kind=SourceKind.REFUND,
+                # The refund's own id, not the payment's: a second partial
+                # refund of the same payment is a second business event and
+                # must post its own entry (`uq_posting_event_source`).
+                source_id=str(refund.id),
+                purpose=PostingPurpose.REFUND,
+                currency=refund.currency,
+                operation_code=OPERATION_ADVANCE_BY_METHOD[payment.method],
+                policy_id=policy.id,
+                lines=[
+                    # Discharge the liability, and the money leaves.
+                    PostingLine(account_id=rule.credit_account_id, debit=refund.amount),
+                    PostingLine(account_id=rule.debit_account_id, credit=refund.amount),
+                ],
+                audit_context={"refund": refund.number, "payment": payment.number},
+            ),
+            actor_user_id=actor_user_id,
+        )
+
+    async def total_refunded(self, *, organization_id: uuid.UUID) -> Decimal:
+        """Every partial refund in the clinic, for the advances-held figure."""
+        stmt = select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+            PaymentRefund.organization_id == organization_id,
+        )
+        return Decimal((await self._session.execute(stmt)).scalar_one() or 0)
+
+    async def refunds_on(
+        self, *, organization_id: uuid.UUID, on: date
+    ) -> dict[PaymentMethod, Decimal]:
+        """Partial refunds given on one day, by the method they came in by.
+
+        Netted off the day's takings: a tile reading "taken today, cash" that
+        ignored money handed back would not match the drawer, which is the
+        one figure a cashier can check by counting.
+        """
+        rows = (
+            await self._session.execute(
+                select(Payment.method, func.coalesce(func.sum(PaymentRefund.amount), 0))
+                .select_from(PaymentRefund)
+                .join(
+                    Payment,
+                    (Payment.id == PaymentRefund.payment_id)
+                    & (Payment.organization_id == PaymentRefund.organization_id),
+                )
+                .where(
+                    PaymentRefund.organization_id == organization_id,
+                    PaymentRefund.refunded_on == on,
+                )
+                .group_by(Payment.method)
+            )
+        ).all()
+        return {method: Decimal(total) for method, total in rows}
 
     # ---------------------------------------------------------- allocation
 
@@ -757,7 +1057,14 @@ class BillingService:
         already_from_payment = await self.allocated_from_payment(
             organization_id=organization_id, payment_id=payment_id
         )
-        available = quantize(payment.amount - already_from_payment, payment.currency)
+        # Money handed back is gone: it can no more settle a bill than it
+        # could be refunded a second time.
+        already_refunded = await self.refunded_from_payment(
+            organization_id=organization_id, payment_id=payment_id
+        )
+        available = quantize(
+            payment.amount - already_from_payment - already_refunded, payment.currency
+        )
         if amount > available:
             raise ValidationFailed(
                 f"Payment {payment.number} has only {available} left to allocate",
@@ -782,6 +1089,12 @@ class BillingService:
             allocated_by_user_id=actor_user_id,
         )
         self._session.add(allocation)
+        # Read before the flush: a failed flush leaves the session needing a
+        # rollback, and touching an expired attribute inside the handler
+        # below raises `PendingRollbackError` instead of the Conflict this
+        # code is written to produce — turning a 409 with an explanation into
+        # a 500 with a request id.
+        payment_number, invoice_number = payment.number, invoice.number
         # The checks above are the readable guard; these are the ones that
         # hold when two transactions interleave. Both are enforced by the
         # database — a unique index over live rows, and a trigger that
@@ -794,13 +1107,13 @@ class BillingService:
             detail = str(exc.orig)
             if "uq_payment_allocation_live" in detail:
                 raise Conflict(
-                    f"Payment {payment.number} is already applied to invoice "
-                    f"{invoice.number}. Reverse that allocation before applying it again.",
+                    f"Payment {payment_number} is already applied to invoice "
+                    f"{invoice_number}. Reverse that allocation before applying it again.",
                     details={"payment_id": str(payment_id), "invoice_id": str(invoice_id)},
                 ) from exc
             if "over-allocated" in detail:
                 raise Conflict(
-                    f"Invoice {invoice.number} is already settled in full. "
+                    f"Invoice {invoice_number} is already settled in full. "
                     "Another payment was applied to it a moment ago.",
                     details={"invoice_id": str(invoice_id)},
                 ) from exc
@@ -810,7 +1123,7 @@ class BillingService:
             # Applying an existing advance converts a liability into revenue
             # settlement; recording it with the payment does not, because the
             # payment entry already carried both sides.
-            policy = await self._policy_for(organization_id, date.today())
+            policy = await self._policy_for(organization_id, clinic_today())
             rule = await self._posting.resolve_policy_rule(
                 organization_id=organization_id,
                 policy_id=policy.id,
@@ -819,7 +1132,7 @@ class BillingService:
             await self._posting.post(
                 organization_id=organization_id,
                 request=PostingRequest(
-                    entry_date=date.today(),
+                    entry_date=clinic_today(),
                     description=(f"Advance from {payment.number} applied to {invoice.number}"),
                     source_kind=SourceKind.PAYMENT,
                     # The allocation's own id, not the payment/invoice pair.
@@ -968,7 +1281,7 @@ class BillingService:
                     entry_id=entry.id,
                     reason=reason,
                     actor_user_id=actor_user_id,
-                    reversal_date=date.today(),
+                    reversal_date=clinic_today(),
                 )
 
     # --------------------------------------------------------------- reads
@@ -1060,6 +1373,11 @@ class BillingService:
         "today's takings" has one definition — recorded payments received on
         that date, with refunded ones excluded, because money that came in and
         went back out again is not takings.
+
+        A **partial** refund given today is netted off the same method's
+        takings for the same reason: a tile reading "taken today, cash" that
+        ignored money handed back would not match the drawer, and the drawer
+        is the one figure a cashier can check by counting.
         """
         rows = (
             await self._session.execute(
@@ -1077,9 +1395,15 @@ class BillingService:
         def amount(method: PaymentMethod) -> Decimal:
             return by_method.get(method, (ZERO, 0))[0]
 
-        cash = amount(PaymentMethod.CASH)
-        card = amount(PaymentMethod.CARD)
-        transfer = amount(PaymentMethod.BANK_TRANSFER)
+        handed_back = await self.refunds_on(organization_id=organization_id, on=on)
+
+        def net(method: PaymentMethod) -> Decimal:
+            taken = amount(method) - handed_back.get(method, ZERO)
+            return taken if taken > ZERO else ZERO
+
+        cash = net(PaymentMethod.CASH)
+        card = net(PaymentMethod.CARD)
+        transfer = net(PaymentMethod.BANK_TRANSFER)
         return TakingsByMethod(
             cash=quantize(cash, "UZS"),
             card=quantize(card, "UZS"),
@@ -1116,9 +1440,11 @@ class BillingService:
                 )
             ).scalar_one()
         )
-        spare = received - applied
-        # Allocations cannot exceed their payment, so this cannot go negative;
-        # clamped because a negative "available" would read as a debt.
+        handed_back = await self.total_refunded(organization_id=organization_id)
+        spare = received - applied - handed_back
+        # Allocations and refunds together cannot exceed their payment, so
+        # this cannot go negative; clamped because a negative "available"
+        # would read as a debt.
         return quantize(spare if spare > ZERO else ZERO, "UZS")
 
     async def unapplied_payments(
@@ -1145,7 +1471,10 @@ class BillingService:
             applied = await self.allocated_from_payment(
                 organization_id=organization_id, payment_id=payment.id
             )
-            available = quantize(payment.amount - applied, payment.currency)
+            handed_back = await self.refunded_from_payment(
+                organization_id=organization_id, payment_id=payment.id
+            )
+            available = quantize(payment.amount - applied - handed_back, payment.currency)
             if available > ZERO:
                 spare.append((payment, available))
         return spare
@@ -1350,6 +1679,25 @@ class BillingService:
             ).scalar_one()
             or 0
         )
+        handed_back = Decimal(
+            (
+                await self._session.execute(
+                    select(func.coalesce(func.sum(PaymentRefund.amount), 0))
+                    .select_from(PaymentRefund)
+                    .join(
+                        Payment,
+                        (Payment.id == PaymentRefund.payment_id)
+                        & (Payment.organization_id == PaymentRefund.organization_id),
+                    )
+                    .where(
+                        PaymentRefund.organization_id == organization_id,
+                        Payment.customer_id == customer_id,
+                        Payment.status == PaymentStatus.RECORDED,
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
         # Only the part actually given up on leaves the outstanding figure;
         # anything the patient did pay towards it already left via `allocated`.
         forgiven = written_off - written_off_allocated
@@ -1358,7 +1706,8 @@ class BillingService:
             invoiced=quantize(invoiced),
             paid=quantize(paid),
             outstanding=quantize(invoiced - allocated - forgiven),
-            unapplied_credit=quantize(paid - allocated),
+            # Money handed back is no longer credit the patient holds.
+            unapplied_credit=quantize(paid - allocated - handed_back),
             written_off=quantize(forgiven),
         )
 

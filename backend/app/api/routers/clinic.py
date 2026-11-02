@@ -28,11 +28,14 @@ from app.core.money import ZERO, quantize
 from app.modules.clinic.enums import SettlementStatus
 from app.modules.clinic.schemas import (
     AppointmentCreateRequest,
+    AppointmentRescheduleRequest,
     AppointmentResponse,
+    AppointmentRow,
     AppointmentStatusRequest,
     BillItemsRequest,
     CompleteItemRequest,
     CorrectItemRequest,
+    DentistRow,
     DuplicateCandidateResponse,
     DuplicateReviewDetail,
     DuplicateReviewResponse,
@@ -436,7 +439,7 @@ async def resolve_duplicate_review(
 
 @router.get(
     "/appointments",
-    response_model=list[AppointmentResponse],
+    response_model=list[AppointmentRow],
     dependencies=[Depends(require_permissions("clinic.appointment.read"))],
 )
 async def list_appointments(
@@ -445,11 +448,50 @@ async def list_appointments(
     audit: AuditDep,
     on: date | None = None,
     patient_id: uuid.UUID | None = None,
-) -> list[AppointmentResponse]:
-    rows = await TreatmentService(db, audit).list_appointments(
+) -> list[AppointmentRow]:
+    """The day's bookings, or one patient's history of them.
+
+    `on` defaults to nothing rather than to today: asking for a patient's
+    appointments means all of them, and the screen that wants a day says
+    which day. The day it means is the clinic's (`app.core.clock`).
+    """
+    views = await TreatmentService(db, audit).appointments_for_the_day(
         organization_id=context.require_organization(), on=on, patient_id=patient_id
     )
-    return [AppointmentResponse.model_validate(r) for r in rows]
+    return [
+        AppointmentRow(
+            **AppointmentResponse.model_validate(v.appointment).model_dump(),
+            patient_code=v.patient_code,
+            patient_name=v.patient_name,
+            patient_phone=v.patient_phone,
+            dentist_name=v.dentist_name,
+            encounter_id=v.encounter_id,
+        )
+        for v in views
+    ]
+
+
+@router.get(
+    "/dentists",
+    response_model=list[DentistRow],
+    dependencies=[Depends(require_permissions("clinic.appointment.read"))],
+)
+async def list_bookable_dentists(
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+) -> list[DentistRow]:
+    """Who a booking may be given to.
+
+    Read with `clinic.appointment.read`, not `identity.user.read`: the
+    receptionist who books the day is not thereby allowed the staff
+    directory. It answers a name and an id, both of which already appear in
+    the day's list beside it.
+    """
+    rows = await TreatmentService(db, audit).bookable_dentists(
+        organization_id=context.require_organization()
+    )
+    return [DentistRow(id=user_id, full_name=name) for user_id, name in rows]
 
 
 @router.post(
@@ -464,12 +506,52 @@ async def book_appointment(
     db: DbSession,
     audit: AuditDep,
 ) -> AppointmentResponse:
+    """Book a patient in.
+
+    The date and time are the clinic's own, stored as a local date and a
+    local time. One dentist cannot be in two chairs: an overlap with a live
+    booking for the same dentist is refused, and the refusal says which
+    booking it clashed with. A booking with no time clashes with nothing.
+    """
     appointment = await TreatmentService(db, audit).book(
         organization_id=context.require_organization(),
         patient_id=payload.patient_id,
         scheduled_on=payload.scheduled_on,
+        scheduled_at=payload.scheduled_at,
         dentist_user_id=payload.dentist_user_id,
         duration_minutes=payload.duration_minutes,
+        reason=payload.reason,
+        actor_user_id=context.user_id,
+    )
+    await db.commit()
+    return AppointmentResponse.model_validate(appointment)
+
+
+@router.post(
+    "/appointments/{appointment_id}/reschedule",
+    response_model=AppointmentResponse,
+    dependencies=[Depends(require_permissions("clinic.appointment.manage"))],
+)
+async def reschedule_appointment(
+    appointment_id: uuid.UUID,
+    payload: AppointmentRescheduleRequest,
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+) -> AppointmentResponse:
+    """Move a booking, keeping the appointment.
+
+    Not a cancellation and a new booking: the audit record shows where it
+    moved from, which a cancel-and-rebook pair does not. The new time is
+    checked against the dentist's other bookings like any other.
+    """
+    appointment = await TreatmentService(db, audit).reschedule(
+        organization_id=context.require_organization(),
+        appointment_id=appointment_id,
+        scheduled_on=payload.scheduled_on,
+        scheduled_at=payload.scheduled_at,
+        duration_minutes=payload.duration_minutes,
+        dentist_user_id=payload.dentist_user_id,
         reason=payload.reason,
         actor_user_id=context.user_id,
     )

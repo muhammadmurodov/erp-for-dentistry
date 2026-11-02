@@ -16,8 +16,10 @@ they can be re-run after a change instead of re-done:
 | `clinic.cjs` | patients, the account, taking a payment | reception, then the cashier |
 | `small-clinic.cjs` | the duty-separation declaration and the duplicate-patient queue | the owner, the cashier, then reception |
 | `patient-to-payment.cjs` | the whole journey: register, examine, record teeth, finish, bill, pay | reception, the dentist, then the cashier |
+| `refunds.cjs` | handing money back: the refundable figure, two partial refunds, the drawer and the ledger | the cashier |
+| `appointments.cjs` | the day: booking, the clash, arrival, moving, cancelling | reception, then the cashier |
 
-Between them they have found fifteen defects, two of them in code that had
+Between them they have found eighteen defects, two of them in code that had
 been passing its unit tests since Phase 2, and two that no test run could have
 found because every suite rebuilds the database from `base`.
 
@@ -87,6 +89,39 @@ works the duplicate queue. It fails on any of:
 
 It leaves the tenant as it found it, including the declaration.
 
+`refunds.cjs` drives the refund the clinic actually gives: not a reversal,
+but a patient who handed over more cash than the bill and wants the
+difference. It takes 800 000 for a 600 000 bill, reads what the dialog says
+is refundable, tries to take more than there is, hands back part of it twice,
+and then checks three things no page can tell you on its own. It fails on any
+of:
+
+- the dialog offering to refund money that is applied to a bill;
+- the till's expected cash not falling by exactly what went out;
+- the ledger disagreeing with the drawer afterwards;
+- the bill the patient really did pay no longer reading as settled;
+- a cash refund being offered with no drawer open, or offered without saying
+  where to go to give one.
+
+`appointments.cjs` drives the day as reception works it. What it is for is
+the two things no unit test reaches: that a time typed at the desk comes back
+as the same time, in the clinic's own hours, and that a double booking is
+refused by the server and explained on the screen rather than discovered
+later by two patients in one chair. It fails on any of:
+
+- the screen opening on a day that is not the clinic's day;
+- a clash that is not warned about before it is sent, or not refused when it
+  is;
+- a booking whose hour, reason or dentist is not what was typed;
+- a patient who has arrived still being offered a no-show;
+- a cancellation taken without a reason, or one that loses the reason;
+- the cashier being offered a control over a book they may only read, or
+  being refused the day they are asked about all morning.
+
+It finds its own free hour rather than assuming one, and cancels the bookings
+it made when it finishes — so a second run finds its hour where it expects to
+and the clash it provokes is its own.
+
 `policy.cjs` drives the policy editor as the owner — the only role that may
 change it — building a version, adding and editing rules, putting it into
 force, discarding a mistaken draft, and checking that an accountant sees the
@@ -94,7 +129,7 @@ same screen with no control that changes it. A step declares the HTTP
 refusals it means to provoke, so the application correctly refusing something
 is not reported as a fault.
 
-All four are re-runnable against the same tenant: `banking.cjs` creates its
+All of them are re-runnable against the same tenant: `banking.cjs` creates its
 own bank account and seeds its own card payment, `policy.cjs` takes its
 effective date from whatever is in force and clears any draft left behind, and
 `clinic.cjs` creates its own staff, service and patients, then banks what it
@@ -132,11 +167,21 @@ node frontend/e2e/banking.cjs
 node frontend/e2e/policy.cjs
 node frontend/e2e/clinic.cjs
 node frontend/e2e/small-clinic.cjs
+node frontend/e2e/patient-to-payment.cjs
+node frontend/e2e/refunds.cjs
+node frontend/e2e/appointments.cjs
 ```
 
-`clinic.cjs` and `small-clinic.cjs` add the two accounts they need — a
-receptionist and a cashier — the first time they run, and sign in as them
-afterwards.
+`/auth/login` is rate-limited to ten a minute, which is a control and not an
+obstacle. Running several passes back to back can spend it: if one reports
+being signed out or an account it created a moment ago as missing, wait a
+minute and run it again.
+
+The passes add the accounts they need — a receptionist, a cashier and, for
+`appointments.cjs`, a dentist — the first time they run, and sign in as them
+afterwards. `appointments.cjs` reads the directory to decide what is already
+there rather than probing with a sign-in, which is the cheaper question and
+the one that cannot be confused with a rate limit.
 
 Each prints `0 problem(s)` when every screen is sound, and otherwise lists
 each problem with the step that produced it.

@@ -277,8 +277,53 @@ class PaymentDetail(PaymentResponse):
     customer_name: str
 
 
-class RefundRequest(BaseModel):
+class PaymentRefundResponse(BaseModel, MoneyMixin):
+    """One partial refund of a payment."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    number: str
+    payment_id: uuid.UUID
+    amount: Decimal
+    currency: str
+    refunded_on: date
+    reason: str
+    self_approved: bool
+
+
+class RefundabilityResponse(BaseModel, MoneyMixin):
+    """What of a payment may still be given back.
+
+    Every figure is derived: the amount paid, less what is applied to bills,
+    less what has already been handed back. The screen shows this before it
+    offers a refund, so the cashier reads the figure the service enforces.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    payment: PaymentResponse
+    amount: Decimal
+    allocated: Decimal
+    refunded: Decimal
+    refundable: Decimal
+    currency: str
+    may_refund: bool
+    #: True where a refund of this payment must come out of a cash drawer.
+    needs_cash_session: bool
+    refunds: list[PaymentRefundResponse] = []
+
+
+class RefundRequest(BaseModel, MoneyMixin):
     reason: str = Field(min_length=3, max_length=1000)
+    #: Omitted refunds the whole payment by reversing it. A figure refunds
+    #: that much of the part nobody has spent — see `refund_advance`.
+    amount: Decimal | None = None
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _no_float(cls, value: object) -> object:
+        return _reject_float(value)
 
 
 class RemoveAllocationRequest(BaseModel):

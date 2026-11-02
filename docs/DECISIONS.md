@@ -1258,3 +1258,161 @@ action is offered — live in `lib/dashboard.ts` as pure functions with 27
 tests, separate from the component that renders them. That split caught its
 first defect immediately: the till tile kept the heading "Till open" above a
 dash when no session was open.
+
+## ADR-045 — Part of a payment is given back as its own record, out of the advance
+
+**Context.** The system could refund a payment, and only in full: every entry
+the payment made was reversed and `Payment.status` became `REFUNDED`. That is
+the right instrument for money taken in error, and it is not the refund this
+clinic actually gives. The commonest one by far is the patient who hands over
+800 000 for a bill of 600 000 and wants the 200 000 back. There was no way to
+record that, which means it either did not happen at the desk or it happened
+off the books — and the second is what really happens.
+
+A partial refund cannot be made out of the full one. There is nothing to
+reverse partially; the payment is still live; and a second partial refund has
+to be able to follow the first.
+
+**Decision — each refund is a record, and what is left is derived.**
+`payment_refund` holds one row per handing back, with its own number, reason,
+day and actor. What remains refundable is `amount − allocated − refunded`,
+computed on demand. This is the same shape as an invoice's balance (ADR-026)
+and for the same reason: a stored remainder is a second place for the truth to
+live, and the two drift the first time a write fails halfway.
+
+A refund is never edited or deleted. Money refunded in error is taken again as
+a payment, so the record keeps both facts.
+
+**Decision — only the unapplied part may be given back.** Money already
+applied to an issued invoice is revenue recognised against work the clinic has
+billed for. Handing it back without crediting the invoice would reopen the
+invoice as a debt: the patient would be refunded *and* still owe for the same
+treatment. Crediting an issued invoice is a credit note, the clinic has no
+approved rule for one (`OPEN_QUESTIONS.md`), and inventing one quietly inside
+a refund is how a ledger acquires a rule nobody agreed to. So the service
+refuses, and the refusal names the instrument that is missing rather than
+guessing one.
+
+**Decision — the ledger entry is the advance posting, reversed.** The money
+arrived as `advance_received_*`: debit cash, credit 6310, a liability the
+clinic owes back. Giving it back discharges exactly that liability, so the
+entry is that rule's own two accounts the other way round. No new account
+mapping is invented, no new policy rule is required, and the feature therefore
+works against a policy version that predates it — which matters, because the
+active policy is the accountant's document and not ours to amend.
+
+Each refund posts under its own `source_id`, not the payment's: a second
+partial refund is a second business event, and `uq_posting_event_source` would
+otherwise refuse it as a duplicate.
+
+**Decision — the drawer's uniqueness rule becomes partial.** ADR-040 made a
+cash refund a movement out of the till, protected by
+`(organization_id, payment_id, kind)` — one receipt and one payout per
+payment. That is right for a full refund and wrong for several partial ones.
+The constraint becomes a *partial* unique index over whole-payment movements
+(`payment_refund_id IS NULL`), and a second partial index guarantees one
+movement per refund record. The protection ADR-040 was written for — the same
+refund paid out of the till twice — is kept in both cases; what is dropped is
+only the assumption that a payment can be refunded once.
+
+**Consequences.** A payment that has been partly refunded can no longer be
+refunded *in full*: reversing the whole entry on top of a refund already paid
+would hand the money over twice. The refusal says so and points at the
+remainder. Allocation subtracts refunds too — money given back cannot settle a
+bill any more than it can be refunded again.
+
+The day's takings are reported net of the day's refunds, because a tile
+reading "taken today, cash" that ignored money handed back would not agree
+with the drawer, and the drawer is the one figure a cashier can check by
+counting.
+
+`self_approved` is recorded on the refund as well as in the audit row, because
+the refund list is what a reviewer actually reads. It is recorded, not
+enforced: whether one person may both take money and give it back is decided
+at the edge, where the duty-separation declaration is known (ADR-041).
+
+## ADR-046 — Business dates come from the clinic's clock; instants stay UTC
+
+**Context.** `date.today()` is the server's day. The server's day is the
+container's day, which is UTC. The clinic is in Tashkent, five hours ahead.
+Between seven in the evening and midnight those are different dates — and
+that is exactly when a dental clinic is still seeing patients.
+
+Everything a date decides was wrong for those five hours: a payment taken at
+nine in the evening was received *yesterday*; the dashboard showed yesterday's
+takings as today's; an appointment booked for this evening did not appear
+under today; and a cash session opened in the evening carried a business date
+whose drawer had already been counted and closed.
+
+**Decision — one function, `app.core.clock.clinic_today()`, and no caller
+uses `date.today()` for a business date.** The module also answers the current
+instant and time of day in the clinic's zone. Timestamps are untouched:
+`created_at`, `occurred_at` and every other instant stay UTC with a timezone,
+which is the only sane way to store a moment. A **date** is not an instant. It
+is a day in the place the work happened, and that place is Tashkent.
+
+**Decision — an appointment's time of day is a local time, not an instant.**
+The clinic books "Tuesday at three". Stored as a timestamp, that becomes a
+different hour for anybody reading it from a different zone, including the
+server. `Appointment.scheduled_on` is a `Date` and `scheduled_at` is a `Time`,
+and the Python annotation now says so — it claimed `datetime | None` over a
+`Time` column, which is the kind of lie that holds until somebody does
+arithmetic with it.
+
+**Consequences.** The zone is a constant, not a setting, because this system
+runs one clinic. When it runs two in different zones it becomes a column on
+`organization` — and every caller already goes through one function, so that
+change is a signature and not a search.
+
+The browser passes compute the clinic's day the same way (`Intl` with
+`timeZone: 'Asia/Tashkent'`), because a verification run on a machine in
+another zone would otherwise look for today's bookings under yesterday.
+
+## ADR-047 — One dentist, one chair; and the roster is not the staff directory
+
+**Context.** Reception books the day. Two things about that had to be decided
+rather than discovered: what happens when the same hour is given to the same
+dentist twice, and how a receptionist is shown the list of dentists.
+
+**Decision — an overlap is refused by the server, under an advisory lock.**
+Two people at two machines both read the day, both find three o'clock free,
+and both book it: neither transaction can see the other's uncommitted row, and
+there is no row to lock because the conflict is with one that does not exist
+yet. So booking takes a transaction-scoped advisory lock on the dentist and
+the day — the smallest key that makes the pair serial without serialising the
+whole book — and the second booking then finds the first and is refused with a
+409 that names the booking it clashed with. A booking with no hour clashes
+with nothing: "Tuesday" is not a claim on a chair. A cancelled or finished
+booking holds no chair either.
+
+The browser warns about the clash before the request is sent, and the server
+refuses it anyway. The warning is a courtesy; the refusal is the rule.
+
+**Decision — the appointment form reads a roster, not the user list.** The
+dentist picker first asked `GET /users`, which needs `identity.user.read`.
+Reception does not hold it, so the only people who book anything were offered
+an empty picker — found by driving the screen in a browser, and invisible to
+every test that signed in as the owner. The fix is not to widen reception's
+permissions: a receptionist has no business reading staff e-mail addresses,
+roles and sign-in history.
+
+`GET /clinic/dentists` answers an id and a name and nothing else, behind
+`clinic.appointment.read` — the same permission as the day the form is drawn
+beside, where those names already appear. Who holds the `dentist` role is
+identity's question, so the clinic module asks
+`IdentityService.active_members_with_role` rather than querying
+`membership_role` itself (ADR-001's boundary rule). The owner is included,
+because in a clinic of three the owner is usually also the dentist; somebody
+whose membership or sign-in has been deactivated is not, because a booking
+handed to somebody who cannot open the visit is a booking nobody works.
+
+**Consequences.** The cashier reads the day and cannot change it —
+`clinic.appointment.read` without `.manage`. That is deliberate: the person
+taking the money is asked all morning who is still expected, and answering
+that is not the same as owning the book.
+
+An appointment remains the one part of the clinic that moves no money. No
+status it can reach — confirmed, arrived, finished, cancelled, no-show —
+posts anything, and a test asserts the ledger is untouched by a day's worth of
+them. Attendance is not revenue; the clinic's own register shows several
+attendances a week that produce none.

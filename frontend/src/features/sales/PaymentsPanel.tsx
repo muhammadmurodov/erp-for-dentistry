@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '@/i18n'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { api } from '@/lib/api'
-import { useCustomers, useInvoices, usePayments } from '@/lib/queries'
+import { useCashSessions, useCustomers, useInvoices, usePayments } from '@/lib/queries'
+import { RefundDialog } from './RefundDialog'
 import { describeError, errorRequestId } from '@/lib/errorMessage'
 import {
   Alert,
@@ -32,7 +33,15 @@ export function PaymentsPanel() {
 
   const mayRead = can('sales.invoice.read')
   const mayRecord = can('sales.payment.record')
-  const mayRefund = can('sales.refund.approve')
+  // Approval authority, or the request side of it where the clinic has
+  // declared it cannot separate duties — the same test the server makes.
+  const mayRefund = can('sales.refund.approve') || can('sales.refund.request')
+  // A cash refund has to come out of an open till. Read here so the row's
+  // button can be offered, and the dialog can say so when none is open.
+  const sessions = useCashSessions(can('cash.register.read'), {
+    session_status: 'OPEN',
+  })
+  const openSessionId = sessions.data?.[0]?.id ?? null
 
   const payments = usePayments(mayRead)
   const [createOpen, setCreateOpen] = useState(false)
@@ -141,7 +150,7 @@ export function PaymentsPanel() {
                           setRefundTarget(payment)
                         }}
                       >
-                        {t.sales.refund}
+                        {t.refunds.openRefund}
                       </Button>
                     ) : null}
                   </Td>
@@ -164,16 +173,13 @@ export function PaymentsPanel() {
       />
 
       <RefundDialog
-        payment={refundTarget}
+        paymentId={refundTarget?.id ?? null}
+        openSessionId={openSessionId}
         onClose={() => setRefundTarget(null)}
         onDone={(message) => {
           setRefundTarget(null)
           setNotice(message)
           invalidate()
-        }}
-        onError={(message) => {
-          setRefundTarget(null)
-          setError(message)
         }}
       />
     </>
@@ -341,64 +347,6 @@ function RecordPaymentDialog({
           </div>
         ) : null}
       </div>
-    </Dialog>
-  )
-}
-
-function RefundDialog({
-  payment,
-  onClose,
-  onDone,
-  onError,
-}: {
-  payment: Payment | null
-  onClose: () => void
-  onDone: (message: string) => void
-  onError: (message: string) => void
-}) {
-  const { t } = useI18n()
-  const [reason, setReason] = useState('')
-
-  const act = useMutation({
-    mutationFn: () =>
-      api.post<PaymentDetail>(`/sales/payments/${payment?.id}/refund`, { reason }),
-    onSuccess: () => {
-      setReason('')
-      onDone(t.sales.refunded2)
-    },
-    onError: (err) => onError(describeError(err, t)),
-  })
-
-  return (
-    <Dialog
-      open={payment !== null}
-      onClose={onClose}
-      title={`${t.sales.refundTitle}: ${payment?.number ?? ''}`}
-      closeLabel={t.common.close}
-      footer={
-        <>
-          <Button onClick={onClose} disabled={act.isPending}>
-            {t.common.cancel}
-          </Button>
-          <Button
-            variant="danger"
-            loading={act.isPending}
-            disabled={!reason.trim()}
-            onClick={() => act.mutate()}
-          >
-            {t.sales.refund}
-          </Button>
-        </>
-      }
-    >
-      <p className="mb-4 text-sm text-[var(--text-secondary)]">{t.sales.refundBody}</p>
-      <Field label={t.sales.reason} htmlFor="refund-reason" required>
-        <Input
-          id="refund-reason"
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </Field>
     </Dialog>
   )
 }

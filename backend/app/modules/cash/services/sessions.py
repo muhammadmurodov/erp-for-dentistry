@@ -196,6 +196,12 @@ class CashSessionService:
             opening_float=opening_float,
         )
 
+        # Read before the flush, not inside the handler. A failed flush leaves
+        # the session needing a rollback, so touching an expired attribute
+        # there raises `PendingRollbackError` and the caller gets a 500
+        # instead of the 409 this code is written to produce. Found by opening
+        # the till twice in a browser: the message existed and never arrived.
+        register_code = register.code
         session = CashSession(
             organization_id=organization_id,
             register_id=register_id,
@@ -213,9 +219,9 @@ class CashSessionService:
             if "uq_cash_session_one_open_per_register" not in str(exc.orig):
                 raise
             raise Conflict(
-                f"Register {register.code} already has an open session. "
+                f"Register {register_code} already has an open session. "
                 "Close it before opening another.",
-                details={"register_code": register.code},
+                details={"register_code": register_code},
             ) from exc
 
         if opening_float > ZERO:
@@ -544,6 +550,7 @@ class CashSessionService:
         payment_id: uuid.UUID,
         amount: Decimal,
         description: str | None = None,
+        payment_refund_id: uuid.UUID | None = None,
         actor_user_id: uuid.UUID | None = None,
     ) -> CashMovement:
         """Record that cash was paid back out of this drawer for a payment.
@@ -560,6 +567,11 @@ class CashSessionService:
         the next day comes out of the drawer that is open now, which is where
         the cash actually goes from. No ledger entry is made here either: the
         refund already posted its reversal.
+
+        `payment_refund_id` is set when this is a **partial** refund, which
+        has a record of its own. The duplicate guard then applies per refund
+        record rather than per payment, because several partial refunds of one
+        payment are legitimate while two payments-out for one refund are not.
         """
         session = await self._require_open(organization_id, session_id)
         movement = CashMovement(
@@ -570,13 +582,20 @@ class CashSessionService:
             description=description,
             occurred_at=datetime.now(UTC),
             payment_id=payment_id,
+            payment_refund_id=payment_refund_id,
             recorded_by_user_id=actor_user_id,
         )
         self._session.add(movement)
         try:
             await self._session.flush()
         except IntegrityError as exc:
-            if "uq_cash_movement_payment_kind" not in str(exc.orig):
+            detail = str(exc.orig)
+            if "uq_cash_movement_refund" in detail:
+                raise Conflict(
+                    "This refund has already been paid out of a cash session",
+                    details={"payment_refund_id": str(payment_refund_id)},
+                ) from exc
+            if "uq_cash_movement_payment_kind" not in detail:
                 raise
             raise Conflict(
                 "This payment has already been refunded from a cash session",

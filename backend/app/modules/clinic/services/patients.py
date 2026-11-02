@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import clinic_today
 from app.core.errors import Conflict, NotFound, ValidationFailed
 from app.modules.accounting.services.numbering import next_number
 from app.modules.audit import events
@@ -158,7 +159,7 @@ class PatientService:
                     details={"birth_date": birth_date.isoformat(), "birth_year": birth_year},
                 )
             birth_year = birth_date.year
-        if birth_year is not None and not 1900 <= birth_year <= date.today().year:
+        if birth_year is not None and not 1900 <= birth_year <= clinic_today().year:
             raise ValidationFailed(
                 "That birth year is not plausible", details={"birth_year": birth_year}
             )
@@ -196,7 +197,7 @@ class PatientService:
             phone_normalized=normalized,
             address=_clean(address),
             notes=_clean(notes),
-            registered_on=registered_on or date.today(),
+            registered_on=registered_on or clinic_today(),
             assigned_dentist_user_id=assigned_dentist_user_id,
         )
         self._session.add(patient)

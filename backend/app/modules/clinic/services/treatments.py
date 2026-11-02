@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import clinic_today
 from app.core.errors import Conflict, NotFound, ValidationFailed
 from app.modules.accounting.services.numbering import next_number
 from app.modules.audit import events
@@ -40,6 +41,7 @@ from app.modules.clinic.models import (
     TreatmentPlan,
 )
 from app.modules.clinic.services.patients import PatientService
+from app.modules.identity.service import IdentityService
 from app.modules.sales.services.billing import BillingService, InvoiceLineInput
 from app.modules.sales.services.catalogue import CatalogueService
 
@@ -76,6 +78,34 @@ def _validate_tooth(tooth_number: int | None) -> int | None:
     return tooth_number
 
 
+@dataclass(frozen=True, slots=True)
+class AppointmentView:
+    """A booking with the names a screen has to show, resolved once."""
+
+    appointment: Appointment
+    patient_code: str
+    patient_name: str
+    patient_phone: str | None
+    dentist_name: str | None
+    #: The visit opened against this booking, where there is one. It is what
+    #: turns "the patient is here" into a record of what was done.
+    encounter_id: uuid.UUID | None
+
+
+#: A booking in one of these states no longer claims a slot: the hour it had
+#: is free for somebody else.
+CLOSED_APPOINTMENT_STATUSES = (
+    AppointmentStatus.CANCELLED,
+    AppointmentStatus.NO_SHOW,
+    AppointmentStatus.COMPLETED,
+)
+
+
+def _minutes(at: time) -> int:
+    """Minutes since midnight, which is what two bookings are compared on."""
+    return at.hour * 60 + at.minute
+
+
 class TreatmentService:
     def __init__(self, session: AsyncSession, audit: AuditRecorder) -> None:
         self._session = session
@@ -90,22 +120,45 @@ class TreatmentService:
         organization_id: uuid.UUID,
         patient_id: uuid.UUID,
         scheduled_on: date,
+        scheduled_at: time | None = None,
         dentist_user_id: uuid.UUID | None = None,
         duration_minutes: int | None = None,
         reason: str | None = None,
         actor_user_id: uuid.UUID | None = None,
     ) -> Appointment:
+        """Book a patient in.
+
+        The date and time are the clinic's own — "Tuesday at three" — and are
+        stored as a local date and a local time rather than an instant. The
+        clinic has one address and one clock; see `app.core.clock` for why the
+        server's own date is not it.
+
+        **One dentist cannot be in two chairs.** Where both appointments have
+        a time and a duration, an overlap with a live booking for the same
+        dentist is refused. A booking with no time is not a conflict with
+        anything: "Tuesday" and "Tuesday at three" are not a double booking,
+        and the clinic's register is full of the former.
+        """
         patient = await self._patients.get(organization_id=organization_id, patient_id=patient_id)
         if patient.merged_into_patient_id is not None:
             raise Conflict(
                 "That record has been merged; book against the surviving one",
                 details={"merged_into": str(patient.merged_into_patient_id)},
             )
+        dentist = dentist_user_id or patient.assigned_dentist_user_id
+        await self._refuse_overlap(
+            organization_id=organization_id,
+            dentist_user_id=dentist,
+            scheduled_on=scheduled_on,
+            scheduled_at=scheduled_at,
+            duration_minutes=duration_minutes,
+        )
         appointment = Appointment(
             organization_id=organization_id,
             patient_id=patient_id,
-            dentist_user_id=dentist_user_id or patient.assigned_dentist_user_id,
+            dentist_user_id=dentist,
             scheduled_on=scheduled_on,
+            scheduled_at=scheduled_at,
             duration_minutes=duration_minutes,
             reason=reason,
             status=AppointmentStatus.SCHEDULED,
@@ -120,9 +173,155 @@ class TreatmentService:
             target_id=appointment.id,
             target_label=patient.code,
             actor_user_id=actor_user_id,
-            new_values={"scheduled_on": scheduled_on.isoformat()},
+            new_values={
+                "scheduled_on": scheduled_on.isoformat(),
+                "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
+                "duration_minutes": duration_minutes,
+            },
         )
         return appointment
+
+    async def reschedule(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        appointment_id: uuid.UUID,
+        scheduled_on: date,
+        scheduled_at: time | None = None,
+        duration_minutes: int | None = None,
+        dentist_user_id: uuid.UUID | None = None,
+        reason: str | None = None,
+        actor_user_id: uuid.UUID | None = None,
+    ) -> Appointment:
+        """Move a booking. The same appointment, at another time.
+
+        Not a cancellation and a new booking: the patient is the same patient
+        keeping the same promise, and the audit record shows where it moved
+        from, which a cancel-and-rebook pair does not.
+
+        A closed appointment cannot be moved. Somebody who did not come is a
+        fact about a day that has passed; book them again instead.
+        """
+        appointment = await self.get_appointment(
+            organization_id=organization_id, appointment_id=appointment_id
+        )
+        if appointment.status in CLOSED_APPOINTMENT_STATUSES:
+            raise Conflict(
+                f"This appointment is {appointment.status.value.lower()} and cannot be "
+                "moved. Book a new one.",
+                details={"status": appointment.status.value},
+            )
+        dentist = dentist_user_id or appointment.dentist_user_id
+        await self._refuse_overlap(
+            organization_id=organization_id,
+            dentist_user_id=dentist,
+            scheduled_on=scheduled_on,
+            scheduled_at=scheduled_at,
+            duration_minutes=duration_minutes,
+            ignore_appointment_id=appointment.id,
+        )
+        before = {
+            "scheduled_on": appointment.scheduled_on.isoformat(),
+            "scheduled_at": (
+                appointment.scheduled_at.isoformat() if appointment.scheduled_at else None
+            ),
+            "duration_minutes": appointment.duration_minutes,
+        }
+        appointment.scheduled_on = scheduled_on
+        appointment.scheduled_at = scheduled_at
+        appointment.duration_minutes = duration_minutes
+        appointment.dentist_user_id = dentist
+        await self._session.flush()
+
+        self._audit.record(
+            events.APPOINTMENT_CHANGED,
+            organization_id=organization_id,
+            target_type="appointment",
+            target_id=appointment.id,
+            reason=(reason.strip() if reason and reason.strip() else None),
+            actor_user_id=actor_user_id,
+            old_values=before,
+            new_values={
+                "scheduled_on": scheduled_on.isoformat(),
+                "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
+                "duration_minutes": duration_minutes,
+            },
+        )
+        return appointment
+
+    async def _refuse_overlap(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        dentist_user_id: uuid.UUID | None,
+        scheduled_on: date,
+        scheduled_at: time | None,
+        duration_minutes: int | None,
+        ignore_appointment_id: uuid.UUID | None = None,
+    ) -> None:
+        """One dentist, one chair, one patient at a time.
+
+        Only **live** bookings conflict: a cancelled or missed appointment is
+        a record of a day, not a claim on it, and the hour it occupied is free
+        again. A booking without a time, or without a duration, is not
+        compared — the clinic books "Tuesday" as often as "Tuesday at three",
+        and treating the former as filling the whole day would stop the day
+        being booked at all.
+
+        **The lock is what makes it true.** Two receptionists booking the same
+        hour at the same moment would both find the hour free: the check reads
+        rows that the other transaction has not committed yet. There is no row
+        to lock — the conflict is with a row that does not exist yet — so the
+        pair is serialised on the dentist and the day, which is the smallest
+        thing that has to be exclusive. It is released when the transaction
+        ends, either way.
+        """
+        if dentist_user_id is None or scheduled_at is None or duration_minutes is None:
+            return
+
+        # Serialise bookings for this dentist on this day. `hashtextextended`
+        # is stable across sessions, which `hash()` in Python is not.
+        await self._session.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(
+                        f"appointment:{organization_id}:{dentist_user_id}:{scheduled_on}", 0
+                    )
+                )
+            )
+        )
+
+        start = _minutes(scheduled_at)
+        end = start + duration_minutes
+        stmt = select(Appointment).where(
+            Appointment.organization_id == organization_id,
+            Appointment.dentist_user_id == dentist_user_id,
+            Appointment.scheduled_on == scheduled_on,
+            Appointment.status.notin_(list(CLOSED_APPOINTMENT_STATUSES)),
+            Appointment.scheduled_at.isnot(None),
+            Appointment.duration_minutes.isnot(None),
+        )
+        if ignore_appointment_id is not None:
+            stmt = stmt.where(Appointment.id != ignore_appointment_id)
+
+        for other in (await self._session.execute(stmt)).scalars():
+            assert other.scheduled_at is not None and other.duration_minutes is not None
+            other_start = _minutes(other.scheduled_at)
+            other_end = other_start + other.duration_minutes
+            # Touching is not overlapping: an appointment ending at 15:00 and
+            # one starting at 15:00 are back to back, which is how a day is
+            # filled.
+            if start < other_end and other_start < end:
+                raise Conflict(
+                    "That dentist is already booked then: "
+                    f"{other.scheduled_at.strftime('%H:%M')} for "
+                    f"{other.duration_minutes} minutes.",
+                    details={
+                        "conflicts_with": str(other.id),
+                        "scheduled_at": other.scheduled_at.isoformat(),
+                        "duration_minutes": other.duration_minutes,
+                    },
+                )
 
     async def set_appointment_status(
         self,
@@ -136,7 +335,11 @@ class TreatmentService:
         appointment = await self.get_appointment(
             organization_id=organization_id, appointment_id=appointment_id
         )
-        if appointment.status in (AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW):
+        if appointment.status in CLOSED_APPOINTMENT_STATUSES:
+            # `COMPLETED` belongs here too: a patient who has been seen cannot
+            # later become a no-show. Leaving it out let a finished visit be
+            # cancelled, which would free a slot in the past and lose the fact
+            # that somebody was treated in it.
             raise Conflict(
                 f"This appointment is {appointment.status.value.lower()} and is closed",
                 details={"status": appointment.status.value},
@@ -199,7 +402,7 @@ class TreatmentService:
                 name="encounter",
                 prefix="ENC-",
             ),
-            occurred_on=occurred_on or date.today(),
+            occurred_on=occurred_on or clinic_today(),
             status=EncounterStatus.OPEN,
             complaint=complaint,
         )
@@ -363,7 +566,7 @@ class TreatmentService:
                 details={"status": item.status.value},
             )
         item.status = TreatmentItemStatus.COMPLETED
-        item.completed_on = completed_on or date.today()
+        item.completed_on = completed_on or clinic_today()
         item.completed_by_user_id = actor_user_id
         await self._session.flush()
 
@@ -443,7 +646,7 @@ class TreatmentService:
             quantity=replacement.quantity,
             planned_on=original.planned_on,
             completed_on=(
-                date.today() if replacement.status is TreatmentItemStatus.COMPLETED else None
+                clinic_today() if replacement.status is TreatmentItemStatus.COMPLETED else None
             ),
             completed_by_user_id=(
                 actor_user_id if replacement.status is TreatmentItemStatus.COMPLETED else None
@@ -562,7 +765,7 @@ class TreatmentService:
 
         catalogue = CatalogueService(self._session, self._audit)
         billing = BillingService(self._session, self._audit)
-        on = issue_date or date.today()
+        on = issue_date or clinic_today()
 
         lines: list[InvoiceLineInput] = []
         for item in chosen:
@@ -688,6 +891,67 @@ class TreatmentService:
         stmt = stmt.order_by(TreatmentItem.created_at)
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def appointments_for_the_day(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        on: date | None = None,
+        patient_id: uuid.UUID | None = None,
+    ) -> list[AppointmentView]:
+        """The day's bookings, with the names the screen needs.
+
+        The names are resolved here rather than in the browser: an
+        appointments list with patient ids in it is not a list anybody can
+        read, and fetching each patient from the screen would be a request
+        per row. There are at most a handful of dentists in this clinic, so
+        each is looked up once and reused.
+        """
+        rows = await self.list_appointments(
+            organization_id=organization_id, on=on, patient_id=patient_id
+        )
+        identity = IdentityService(self._session, self._audit)
+        dentists: dict[uuid.UUID, str] = {}
+        views: list[AppointmentView] = []
+        for appointment in rows:
+            patient = await self._patients.get(
+                organization_id=organization_id, patient_id=appointment.patient_id
+            )
+            dentist_name: str | None = None
+            if appointment.dentist_user_id is not None:
+                if appointment.dentist_user_id not in dentists:
+                    try:
+                        user = await identity.get_user(appointment.dentist_user_id)
+                        dentists[appointment.dentist_user_id] = user.full_name
+                    except NotFound:
+                        dentists[appointment.dentist_user_id] = ""
+                dentist_name = dentists[appointment.dentist_user_id] or None
+            encounter = (
+                await self._session.execute(
+                    select(Encounter.id).where(
+                        Encounter.organization_id == organization_id,
+                        Encounter.appointment_id == appointment.id,
+                    )
+                )
+            ).scalars().first()
+            views.append(
+                AppointmentView(
+                    appointment=appointment,
+                    patient_code=patient.code,
+                    patient_name=patient.display_name,
+                    patient_phone=patient.phone,
+                    dentist_name=dentist_name,
+                    encounter_id=encounter,
+                )
+            )
+        views.sort(
+            key=lambda v: (
+                v.appointment.scheduled_on,
+                v.appointment.scheduled_at or time(0, 0),
+                v.patient_name,
+            )
+        )
+        return views
+
     async def list_appointments(
         self,
         *,
@@ -702,3 +966,27 @@ class TreatmentService:
             stmt = stmt.where(Appointment.patient_id == patient_id)
         stmt = stmt.order_by(Appointment.scheduled_on, Appointment.created_at)
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def bookable_dentists(
+        self, *, organization_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str]]:
+        """The people a booking may be given to, by id and name.
+
+        Reception books the day, and so needs to know who is in the chairs —
+        which is not the same as being allowed to read the staff directory.
+        So the appointment screen asks for this list, gated on
+        `clinic.appointment.read`, instead of listing users: it carries a
+        name and an id and nothing else, and both already appear in the day
+        it is drawn beside.
+
+        Who holds the `dentist` role is identity's question, not this
+        module's, so it is asked rather than queried. The owner counts too:
+        in a clinic of three the owner is usually also the dentist.
+        """
+        identity = IdentityService(self._session, self._audit)
+        people = await identity.active_members_with_role(
+            organization_id=organization_id,
+            role_code="dentist",
+            include_primary_owner=True,
+        )
+        return [(user.id, user.full_name) for user in people]

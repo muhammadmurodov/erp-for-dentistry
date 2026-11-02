@@ -66,7 +66,7 @@ command refuses to run when `APP_ENV=production`.
 
 ```bash
 make check            # lint + full test suite, both sides
-make test-backend     # 153 backend tests
+make test-backend     # 613 backend tests
 ```
 
 The backend tests run against a real PostgreSQL instance, because much of what

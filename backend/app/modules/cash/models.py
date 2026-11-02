@@ -195,6 +195,11 @@ class CashMovement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     #: Set when this movement is a customer payment. The link is held here,
     #: on the cash side, so that `sales` need not know cash sessions exist.
     payment_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    #: Set when this movement pays back *part* of a payment. A full refund
+    #: leaves it `NULL`, which is what keeps the one-refund-per-payment rule
+    #: below meaningful for the full case while allowing several partial
+    #: refunds of the same payment, each with its own record.
+    payment_refund_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
     #: Only meaningful for a DEPOSIT: which transit account it posts to.
     deposit_route: Mapped[DepositRoute | None] = mapped_column(
         _enum(DepositRoute, "cash_deposit_route")
@@ -218,6 +223,12 @@ class CashMovement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             ondelete="RESTRICT",
             name="fk_cash_movement_payment",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "payment_refund_id"],
+            ["payment_refund.organization_id", "payment_refund.id"],
+            ondelete="RESTRICT",
+            name="fk_cash_movement_payment_refund",
+        ),
         # One movement per payment **per direction**: a payment cannot be
         # counted into the drawer twice, and cannot be paid back out of it
         # twice, whatever the caller does.
@@ -228,8 +239,27 @@ class CashMovement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         # still expecting the money. The day's count then reported a shortage
         # that was not one, and real cash was written off to 9430 as a loss
         # (ADR-040).
-        UniqueConstraint(
-            "organization_id", "payment_id", "kind", name="uq_cash_movement_payment_kind"
+        # Applies to whole-payment movements only. A *partial* refund carries
+        # its own `payment_refund_id` and is excluded here, because several
+        # partial refunds of one payment are legitimate — each is a separate
+        # handing back of money and a separate row in `payment_refund`. The
+        # index below keeps the guarantee that matters in that case: one
+        # drawer movement per refund record, so a repeated request cannot pay
+        # the same refund out twice.
+        Index(
+            "uq_cash_movement_payment_kind",
+            "organization_id",
+            "payment_id",
+            "kind",
+            unique=True,
+            postgresql_where=text("payment_refund_id IS NULL"),
+        ),
+        Index(
+            "uq_cash_movement_refund",
+            "organization_id",
+            "payment_refund_id",
+            unique=True,
+            postgresql_where=text("payment_refund_id IS NOT NULL"),
         ),
         CheckConstraint("amount > 0", name="amount_positive"),
         CheckConstraint(

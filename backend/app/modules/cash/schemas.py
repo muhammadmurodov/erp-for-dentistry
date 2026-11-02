@@ -99,15 +99,24 @@ class OpenSessionRequest(BaseModel, MoneyMixin):
         return _reject_float(value)
 
 
-class CashRefundRequest(BaseModel):
+class CashRefundRequest(BaseModel, MoneyMixin):
     """Refund a cash payment out of the open drawer.
 
-    No amount: a refund is of the whole payment, and the figure comes from
-    the payment record rather than from whoever is asking.
+    `amount` omitted means the whole payment, reversed, and the figure comes
+    from the payment record rather than from whoever is asking. An `amount`
+    given is a **partial** refund out of the unapplied part of the payment —
+    the patient's spare money — which is the clinic's commonest refund: too
+    much cash handed over for the bill.
     """
 
     payment_id: uuid.UUID
     reason: str = Field(min_length=3, max_length=1000)
+    amount: Decimal | None = None
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _no_float_amount(cls, value: object) -> object:
+        return _reject_float(value)
 
 
 class CashExpenseRequest(BaseModel, MoneyMixin):

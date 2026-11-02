@@ -112,6 +112,48 @@ class IdentityService:
             raise NotFound("User not found")
         return user
 
+    async def active_members_with_role(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        role_code: str,
+        include_primary_owner: bool = False,
+    ) -> list[User]:
+        """Everybody in one organization who holds a role, by name.
+
+        Here rather than in the module that asks, because who holds a role
+        is this module's question: the appointment book needs the dentists,
+        the till rota would need the cashiers, and neither should learn the
+        shape of `membership_role` to find out.
+
+        Inactive memberships and disabled sign-ins are left out — a list of
+        people to hand work to should not offer somebody who has left. The
+        owner is included on request, because in a clinic of three the owner
+        usually does the work as well.
+        """
+        stmt = (
+            select(User)
+            .join(Membership, Membership.user_id == User.id)
+            .outerjoin(
+                MembershipRole,
+                (MembershipRole.membership_id == Membership.id)
+                & (MembershipRole.organization_id == Membership.organization_id),
+            )
+            .outerjoin(Role, Role.id == MembershipRole.role_id)
+            .where(
+                Membership.organization_id == organization_id,
+                Membership.is_active.is_(True),
+                User.is_active.is_(True),
+            )
+            .distinct()
+            .order_by(User.full_name)
+        )
+        held = Role.code == role_code
+        stmt = stmt.where(
+            (held | Membership.is_primary_owner.is_(True)) if include_primary_owner else held
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def list_memberships(self, user_id: uuid.UUID) -> list[Membership]:
         stmt = (
             select(Membership)

@@ -365,6 +365,70 @@ class Payment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
 
+class PaymentRefund(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Part of a payment given back, as its own record.
+
+    Refunding a payment *in full* needs no row of its own: it reverses every
+    entry the payment made and `Payment.status` becomes `REFUNDED`. Giving
+    back **part** of one cannot work that way. There is nothing to reverse
+    partially, the payment is still live, and a second partial refund must be
+    able to follow the first — so each refund is a record, and what is left
+    refundable is derived by subtracting them, exactly as an invoice's balance
+    is derived from its allocations (ADR-026).
+
+    **Only money the patient has not spent.** A refund here comes out of the
+    unapplied part of the payment — the advance, a liability the clinic owes
+    back. Money already applied to an issued invoice is not refundable this
+    way, because giving it back without crediting the invoice would leave the
+    patient owing for treatment they have been refunded for. That case needs a
+    credit note, and the clinic has no approved rule for one yet
+    (`OPEN_QUESTIONS.md`): the service refuses it and says so.
+
+    A refund is never deleted or edited. Wrongly refunded money is taken again
+    as a payment, which leaves both facts in the record.
+    """
+
+    __tablename__ = "payment_refund"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("organization.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    number: Mapped[str] = mapped_column(String(32), nullable=False)
+    payment_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MoneyType, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="UZS")
+    refunded_on: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    refunded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("app_user.id", ondelete="RESTRICT")
+    )
+    #: True when the person who took the payment also gave it back, which only
+    #: an organization that has declared it cannot separate duties may do
+    #: (ADR-041). Recorded here as well as in the audit row because this is
+    #: the list a reviewer reads.
+    self_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        *_org_scope("payment_refund"),
+        UniqueConstraint(
+            "organization_id", "number", name="uq_payment_refund_organization_id_number"
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "payment_id"],
+            ["payment.organization_id", "payment.id"],
+            ondelete="RESTRICT",
+            name="fk_payment_refund_payment",
+        ),
+        CheckConstraint("amount > 0", name="amount_positive"),
+        CheckConstraint("length(btrim(reason)) > 0", name="reason_not_blank"),
+        Index("ix_payment_refund_payment", "organization_id", "payment_id"),
+        Index("ix_payment_refund_day", "organization_id", "refunded_on"),
+    )
+
+
 class PaymentAllocation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """How much of one payment is applied to one invoice.
 

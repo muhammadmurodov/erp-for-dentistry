@@ -10,6 +10,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import AuditDep, DbSession, OrgCtx, require_permissions
+from app.core.clock import clinic_today
 from app.core.errors import ValidationFailed
 from app.core.money import ZERO, quantize
 from app.modules.sales.enums import InvoiceStatus, PaymentMethod, PaymentStatus
@@ -29,8 +30,10 @@ from app.modules.sales.schemas import (
     IssueInvoiceRequest,
     PaymentCreateRequest,
     PaymentDetail,
+    PaymentRefundResponse,
     PaymentResponse,
     ReceivablesAgeing,
+    RefundabilityResponse,
     RefundRequest,
     RemoveAllocationRequest,
     ServiceCreateRequest,
@@ -173,7 +176,7 @@ async def list_services(
     services = await catalogue.list_services(
         organization_id=organization_id, search=search, active_only=active_only
     )
-    as_of = on or date.today()
+    as_of = on or clinic_today()
     result: list[ServiceWithPrice] = []
     for service in services:
         price = await catalogue.price_on(
@@ -623,14 +626,69 @@ async def refund_payment(
             "Use the cash register screen so the drawer and the ledger agree.",
             details={"method": existing.method.value},
         )
-    payment = await billing.refund_payment(
-        organization_id=organization_id,
-        payment_id=payment_id,
-        reason=payload.reason,
-        actor_user_id=context.user_id,
-    )
+    if payload.amount is not None:
+        # Part of a card or transfer payment, out of the patient's spare
+        # money. No drawer is involved, so unlike cash it belongs here.
+        await billing.refund_advance(
+            organization_id=organization_id,
+            payment_id=payment_id,
+            amount=payload.amount,
+            reason=payload.reason,
+            actor_user_id=context.user_id,
+        )
+    else:
+        await billing.refund_payment(
+            organization_id=organization_id,
+            payment_id=payment_id,
+            reason=payload.reason,
+            actor_user_id=context.user_id,
+        )
     await db.commit()
+    payment = await billing.get_payment(organization_id=organization_id, payment_id=payment_id)
     return await _payment_detail(db, audit, organization_id, payment)
+
+
+@router.get(
+    "/payments/{payment_id}/refundability",
+    response_model=RefundabilityResponse,
+    dependencies=[Depends(require_permissions("sales.invoice.read"))],
+)
+async def payment_refundability(
+    payment_id: uuid.UUID,
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+) -> RefundabilityResponse:
+    """What of this payment may still be given back, and what already was.
+
+    Read before a refund is offered, so the figure on the screen is the one
+    the service will enforce rather than one the browser worked out. Every
+    part is derived: the amount paid, less what is applied to bills, less
+    what has already been handed back.
+    """
+    organization_id = context.require_organization()
+    billing = BillingService(db, audit)
+    payment = await billing.get_payment(organization_id=organization_id, payment_id=payment_id)
+    figures = await billing.refundability(
+        organization_id=organization_id, payment_id=payment_id
+    )
+    refunds = await billing.list_refunds(
+        organization_id=organization_id, payment_id=payment_id
+    )
+    response = PaymentResponse.model_validate(payment)
+    response.allocated = figures.allocated
+    response.advance = figures.refundable
+    return RefundabilityResponse(
+        payment=response,
+        amount=figures.amount,
+        allocated=figures.allocated,
+        refunded=figures.refunded,
+        refundable=figures.refundable,
+        currency=figures.currency,
+        may_refund=figures.may_refund,
+        needs_cash_session=payment.method is PaymentMethod.CASH,
+        refunds=[PaymentRefundResponse.model_validate(r) for r in refunds],
+    )
 
 
 @router.post(

@@ -257,6 +257,11 @@ async def refund_cash_payment(
 
     The drawer is this one, not necessarily the one that took the payment: a
     refund given the next day comes out of the till that is open now.
+
+    **With an amount, it is a partial refund** out of the unapplied part of
+    the payment, and several may follow one another. Without one it is the
+    whole payment, reversed. Both leave the drawer by the same movement, so
+    the till cannot end the day expecting money that was handed back.
     """
     organization_id = context.require_organization()
 
@@ -304,6 +309,42 @@ async def refund_cash_payment(
         payment.recorded_by_user_id is not None
         and payment.recorded_by_user_id == context.user_id
     )
+
+    if payload.amount is not None:
+        # **Part** of the payment, out of the patient's spare money. The
+        # commonest refund in the clinic: too much cash handed over for the
+        # bill. The service refuses to touch money already applied to an
+        # issued invoice, because giving that back without crediting the
+        # invoice would refund the patient and still leave them owing for the
+        # same treatment.
+        refund = await billing.refund_advance(
+            organization_id=organization_id,
+            payment_id=payload.payment_id,
+            amount=payload.amount,
+            reason=payload.reason,
+            actor_user_id=context.user_id,
+            self_approved=self_approved,
+        )
+        await cash.record_payment_refund(
+            organization_id=organization_id,
+            session_id=session_id,
+            payment_id=payment.id,
+            amount=refund.amount,
+            description=f"Refund {refund.number} of {payment.number}",
+            payment_refund_id=refund.id,
+            actor_user_id=context.user_id,
+        )
+        await db.commit()
+        refunded = await billing.get_payment(
+            organization_id=organization_id, payment_id=payload.payment_id
+        )
+        figures = await billing.refundability(
+            organization_id=organization_id, payment_id=payload.payment_id
+        )
+        response = PaymentResponse.model_validate(refunded)
+        response.allocated = figures.allocated
+        response.advance = figures.refundable
+        return response
 
     refunded = await billing.refund_payment(
         organization_id=organization_id,

@@ -208,7 +208,7 @@ erDiagram
 | --- | --- |
 | `patient` | Almost every column nullable, deliberately: the clinic's own register leaves the birth year and address blank on a good proportion of rows, and records a *year* of birth, not a date. `customer_id` is the one link to the money |
 | `patient_duplicate_review` | A suspected duplicate awaiting a human decision. `DISTINCT` is recorded as well as `MERGED`, so the same pair is not raised at every visit |
-| `appointment` | A promise about time. Carries nothing financial |
+| `appointment` | A promise about time. Carries nothing financial. `scheduled_on` is a `date` and `scheduled_at` a `time`, both the clinic's own: "Tuesday at three" is not an instant (ADR-046) |
 | `encounter` | One visit. Behind `clinic.clinical.read`: complaint, notes, body weight |
 | `treatment_plan` | A course of work spanning visits, which is what prosthetics is |
 | `treatment_item` | **One tooth, one service, one status.** FDI tooth numbers, checked in SQL as well as in Python. `invoice_line_id` is the single link from clinical work to money |
@@ -290,6 +290,50 @@ Three properties follow, and each was learned the hard way:
 * **It takes the locks itself.** Without them, two transactions each insert a
   row, each sums without seeing the other, and both pass.
 
+## Giving money back · `payment_refund`
+
+Refunding a payment in full needs no table: every entry it made is reversed
+and `payment.status` becomes `REFUNDED`. Giving back **part** of one cannot
+work that way — there is nothing to reverse partially, the payment stays
+live, and a second partial refund must be able to follow the first. So each
+refund is a row (ADR-045), and what is left refundable is derived:
+
+```
+refundable = payment.amount
+           − Σ live allocations of that payment
+           − Σ payment_refund rows for that payment
+```
+
+No remainder is stored, for the same reason an invoice stores no balance: a
+second place for the truth to live is a second place for it to be wrong.
+
+| Table | Notes |
+| --- | --- |
+| `payment_refund` | One handing back. Its own number, reason, day and actor; `self_approved` where one person both took the money and gave it back (ADR-041). Never edited, never deleted — money refunded in error is taken again as a payment |
+
+The drawer's rule needed one change to allow it. ADR-040 protected the till
+with `UNIQUE (organization_id, payment_id, kind)` — one receipt and one
+payout per payment — which is right for a full refund and wrong for several
+partial ones:
+
+```sql
+-- Whole-payment movements only: a payment cannot be counted into the drawer
+-- twice, or paid back out of it twice.
+CREATE UNIQUE INDEX uq_cash_movement_payment_kind
+    ON cash_movement (organization_id, payment_id, kind)
+    WHERE payment_refund_id IS NULL;
+
+-- And one payout per refund record, which is the same guarantee for the
+-- partial case: a repeated request cannot pay the same refund twice.
+CREATE UNIQUE INDEX uq_cash_movement_refund
+    ON cash_movement (organization_id, payment_refund_id)
+    WHERE payment_refund_id IS NOT NULL;
+```
+
+Migration `0012` makes that change additively: every movement already
+recorded has `payment_refund_id IS NULL` and so falls under the same rule it
+was written under.
+
 ## Concurrency
 
 The scenario to prevent: two cashiers apply the same payment at the same
@@ -304,6 +348,8 @@ moment.
 | Allocation sum check under that lock | Prevents over-allocation |
 | `trg_payment_allocation_within_limits` | The same check in the database, which holds whatever code path reaches the table |
 | Partial unique index on live allocations | The same payment cannot be applied to one invoice twice |
+| `SELECT ... FOR UPDATE` on the payment before a refund | Two cashiers refunding the same advance would otherwise both read the same refundable amount and both pass the check |
+| Transaction-scoped advisory lock on `(dentist, day)` | Two receptionists booking one hour cannot both win. There is no row to lock, because the conflict is with one that does not exist yet (ADR-047) |
 | One transaction per service call | Partial work is impossible |
 
 A preliminary "is this already posted?" check is never the only defence.

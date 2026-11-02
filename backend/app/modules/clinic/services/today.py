@@ -36,6 +36,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import clinic_today
 from app.modules.audit.service import AuditRecorder
 from app.modules.cash.services.sessions import CashSessionService
 from app.modules.clinic.enums import (
@@ -126,7 +127,7 @@ class TodayService:
         include_drawer: bool = False,
         include_duplicates: bool = False,
     ) -> TodayView:
-        today = business_date or date.today()
+        today = business_date or clinic_today()
 
         appointments = (
             await self._appointments(organization_id, today) if include_appointments else None

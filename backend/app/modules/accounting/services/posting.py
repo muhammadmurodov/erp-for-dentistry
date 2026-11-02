@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import clinic_today
 from app.core.errors import (
     Conflict,
     DuplicatePostingEvent,
@@ -595,7 +596,7 @@ class PostingService:
             for line in lines
         ]
 
-        on = reversal_date or date.today()
+        on = reversal_date or clinic_today()
         period = await self.resolve_period(organization_id=organization_id, on=on)
         if period.status is not PeriodStatus.OPEN:
             raise PeriodClosed(

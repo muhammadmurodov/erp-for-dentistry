@@ -2,9 +2,9 @@
 
 ## Current state
 
-**543 backend tests and 70 frontend tests: 541 passed, 2 skipped
+**613 backend tests and 129 frontend tests: 611 passed, 2 skipped
 deliberately, 0 failed** (the two skips are explained below). Verified counts,
-from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
+from `pytest tests -q` and `vitest run`, last re-run 2026-11-02:
 
 | Suite | Tests | Covers |
 | --- | --- | --- |
@@ -19,6 +19,8 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 | `tests/clinic/test_today.py` | 19 | The dashboard's read model: today's takings by method, work unfinished and unbilled, and — the ones that matter — that the debt equals the ageing report to the som, the advance equals the patient account, and a withheld section is absent rather than zero (ADR-044) |
 | `tests/clinic/test_duplicate_review.py` | 26 | Nothing merges on matching alone; both records stay live until somebody decides; the queue carries both records; which record a merge keeps; a settled pair is not raised again; the superseded record is kept and audited (ADR-042) |
 | `tests/clinic/test_payment_validation.py` | 38 | The four payment scenarios, the derived remaining balance, overpayment at service *and* database level, duplicate submission, two concurrency races, and a cash refund moving the drawer and the ledger together (ADR-040) |
+| `tests/sales/test_partial_refunds.py` | 23 | Giving part of a payment back: only the unapplied part, never money applied to an issued bill, the remainder derived rather than stored, a second refund following the first, the advance posting reversed under the active policy, and a payment already partly refunded refusing a full reversal (ADR-045) |
+| `tests/clinic/test_appointments.py` | 28 | The day and the hour as the clinic's own, not the server's; one dentist in one chair, including two receptionists booking the same hour at the same moment; cancelling with a reason; the roster the booking form is drawn from; and that no appointment status posts anything (ADR-046, ADR-047) |
 | `tests/sales/test_receivables.py` | 7 | Ageing buckets, cut-off dates, payments reducing the aged amount |
 | `tests/cash/test_sessions.py` | 31 | Sessions, the daily close, discrepancies, deposits, drawer-ledger agreement |
 | `tests/banking/test_reconciliation.py` | 29 | Matching one-to-many and many-to-one, commission, over-matching, double counting |
@@ -27,6 +29,9 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 | `tests/integration/test_phase2_slice.py` | 8 | Chart → calendar → posting → trial balance, over HTTP |
 | `tests/integration/test_phase3c_slice.py` | 4 | Register → treat → bill → issue → settle, over HTTP; the cashier/clinical access split; and a cash refund refused on the sales route but taken at the register (ADR-040) |
 | `tests/integration/test_phase3d_slice.py` | 6 | Import → match → the books, over HTTP, including the upload itself |
+| `tests/integration/test_partial_refund_slice.py` | 6 | Overpay → refund the difference → count the drawer, over HTTP: the till's expected cash falls by what went out, the ledger agrees, and the bill the patient really did pay stays settled (ADR-045) |
+| `tests/integration/test_appointments_slice.py` | 11 | The hour surviving the round trip, an overlap arriving as a 409 that names the booking it clashed with, the cashier reading the day without owning it, and reception reading the dentist roster while the staff directory stays refused (ADR-047) |
+| `tests/integration/test_duplicate_open_session_slice.py` | 2 | Opening the till twice. Kept as an integration test on purpose: inside one transaction the register is still loaded, so the 409 needs no query and the defect — a 500 instead — cannot appear |
 | `tests/security/test_authentication.py` | 19 | Sign-in, lockout, refresh rotation, replay detection |
 | `tests/security/test_authorization.py` | 18 | Least privilege, escalation attempts, SoD enforcement |
 | `tests/security/test_tenant_isolation.py` | 11 | Cross-tenant access, at API, service and database level |
@@ -41,6 +46,8 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-01:
 | `src/lib/fdi.test.ts` | 21 | Tooth numbers and surfaces: which numbers are teeth in FDI notation, that an empty tooth box is not an error, that `om` and `MO` are one filling, and that a chart reads outwards from the midline rather than numerically |
 | `src/lib/dashboard.test.ts` | 27 | Which tiles a person sees, with what emphasis and where they lead; that a withheld figure is never rendered as zero; that no quick action is offered without both the permission and a screen behind it |
 | `src/lib/patientIdentity.test.ts` | 18 | Comparing two patient records: what must and must not count as a difference — case, spacing and telephone formatting are not differences, a blank is *missing* rather than conflicting, and the screen shows the original spelling |
+| `src/lib/refund.test.ts` | 17 | Which of the two refunds a payment is eligible for and why not, the refundable amount in `bigint` minor units, and the dialog refusing to submit more than there is — the same rules the service enforces under a row lock (ADR-045) |
+| `src/lib/appointments.test.ts` | 21 | The clinic's day in the browser, a local time rendered and parsed without a timezone shifting it, which actions a booking in each state may be offered, and the clash the form warns about before anything is sent (ADR-046, ADR-047) |
 
 **Two tests skip, and say why.** `test_a_written_off_bill_takes_no_payment`
 and `test_a_written_off_debt_owes_nothing_collectible`, both in
@@ -308,7 +315,7 @@ Stated plainly:
 ## Manual browser verification
 
 The interface has been driven end to end in a real Chrome via Playwright and
-each screen inspected, across seven passes:
+each screen inspected, across ten passes:
 
 * **Phase 1** — login, a rejected sign-in, the dashboard, a not-built-yet
   module page, the four settings tabs, the role dialog refusing a
@@ -345,6 +352,28 @@ each screen inspected, across seven passes:
   not recognise it again. Driven by `frontend/e2e/clinic.cjs`, which is
   re-runnable: it creates its own staff, service and patients, and banks its
   takings and closes the drawer it opened.
+* **The whole journey** — register, examine, record teeth, finish, bill,
+  pay, as reception, then the dentist, then the cashier. Driven by
+  `frontend/e2e/patient-to-payment.cjs`.
+* **A clinic of three** — the duty-separation declaration and the
+  duplicate-patient queue: that the declaration is refused to everybody but
+  the owner, grants no permission to anybody, lets a cashier close their own
+  short till with the close recorded as `self_approved` while the shortage
+  still reaches 9430, and that no two patients merge without a person
+  confirming it twice. Driven by `frontend/e2e/small-clinic.cjs`, which
+  leaves the tenant as it found it, declaration included.
+* **Refunds** — 800 000 taken for a 600 000 bill, the dialog's refundable
+  figure, an attempt to take more than there is, part of it handed back
+  twice, and then the three things no page can tell you on its own: the
+  till's expected cash falling by exactly what went out, the ledger
+  agreeing, and the bill the patient really did pay still settled. Driven by
+  `frontend/e2e/refunds.cjs`, which opens and closes its own drawer.
+* **Appointments** — a booking into a free hour, the clash warned about and
+  then refused by the server, a patient confirmed and admitted, a booking
+  moved to the next day, one cancelled with a reason, the dashboard's count,
+  and a cashier who reads the day and is offered no control over it. Driven
+  by `frontend/e2e/appointments.cjs`, which finds its own free hour and
+  gives the hours back when it finishes, so it can be run twice in a row.
 * **Accounting policy** — the version in force and its rules, a second
   build from the workbook refused because one is already in force, a new
   version, a rule added and another edited, the draft put into force and the
@@ -359,10 +388,12 @@ The Phase 3d and 3c scripts additionally fail on a page wider than its
 viewport, which is the mechanical form of the `<select>` defect Phase 2 found
 by eye.
 
-Between them those passes found **twenty-two** defects that neither the type
+Between them those passes found **twenty-five** defects that neither the type
 checker, the linter nor the test suite could see, because they were all about
-what the page actually rendered — among them a statement that could be
-imported into the wrong bank account without saying so. They are listed in
+what the page actually rendered, or about who was looking at it — among them
+a statement that could be imported into the wrong bank account without saying
+so, and an appointment form that offered reception no dentist to book with
+while working perfectly for the owner every test signed in as. They are listed in
 `IMPLEMENTATION_STATUS.md`. The lesson worth keeping: *build and typecheck
 passing is not the same as the screen being right.*
 

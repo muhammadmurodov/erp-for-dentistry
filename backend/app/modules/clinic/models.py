@@ -20,7 +20,7 @@ not.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -239,7 +239,12 @@ class Appointment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         PgUUID(as_uuid=True), ForeignKey("app_user.id", ondelete="RESTRICT")
     )
     scheduled_on: Mapped[date] = mapped_column(Date, nullable=False)
-    scheduled_at: Mapped[datetime | None] = mapped_column(Time)
+    #: Time of day, in the clinic's own zone (`app.core.clock`). A local date
+    #: and a local time, not an instant: the clinic books "Tuesday at three",
+    #: and storing that as a UTC timestamp would make it a different hour for
+    #: anybody reading it from anywhere else, including the server itself.
+    #: Optional, because the register books plenty of patients for "Tuesday".
+    scheduled_at: Mapped[time | None] = mapped_column(Time)
     duration_minutes: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[AppointmentStatus] = mapped_column(
         _enum(AppointmentStatus, "appointment_status"),

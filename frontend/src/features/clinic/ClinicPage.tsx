@@ -8,15 +8,17 @@ import { Alert, Badge, PageHeader } from '@/components/ui'
 import { PatientsPanel } from './PatientsPanel'
 import { PatientAccount } from './PatientAccount'
 import { DuplicateReviewQueue } from './DuplicateReviewQueue'
+import { AppointmentsPanel } from './AppointmentsPanel'
 
 /**
  * The clinic screen: find a patient and work on their account, or settle a
  * suspected duplicate.
  *
- * Two tabs, not two pages buried in a menu, because in a clinic run by two or
- * three people the same person does both: registers the patient at the desk,
- * then clears the duplicate queue when it is quiet. The badge on the
- * duplicates tab is the only reason anybody would think to look there.
+ * Tabs rather than pages buried in a menu, because in a clinic run by two or
+ * three people the same person does all of it: books the appointment on the
+ * telephone, registers the patient at the desk, then clears the duplicate
+ * queue when it is quiet. The badge on the duplicates tab is the only reason
+ * anybody would think to look there.
  */
 export function ClinicPage() {
   const { t } = useI18n()
@@ -38,6 +40,7 @@ export function ClinicPage() {
       <Routes>
         <Route index element={<Navigate to="patients" replace />} />
         <Route path="patients" element={<PatientsSection />} />
+        <Route path="appointments" element={<AppointmentsPanel />} />
         <Route path="duplicates" element={<DuplicateReviewQueue />} />
         <Route path="*" element={<Navigate to="patients" replace />} />
       </Routes>
@@ -56,6 +59,9 @@ function ClinicTabs() {
 
   const tabs = [
     { to: 'patients', label: t.clinic.patientsTabLabel, count: 0 },
+    ...(can('clinic.appointment.read')
+      ? [{ to: 'appointments', label: t.appointments.tabLabel, count: 0 }]
+      : []),
     ...(mayDecide
       ? [{ to: 'duplicates', label: t.clinic.reviewQueueTab, count: waiting }]
       : []),

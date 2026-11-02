@@ -9,6 +9,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import clinic_today
 from app.core.errors import Conflict, NotFound, ValidationFailed
 from app.core.money import quantize
 from app.modules.audit.service import AuditRecorder
@@ -85,7 +86,7 @@ class CatalogueService:
                 organization_id=organization_id,
                 service_id=service.id,
                 amount=price,
-                effective_from=effective_from or date.today(),
+                effective_from=effective_from or clinic_today(),
                 currency=currency,
             )
 

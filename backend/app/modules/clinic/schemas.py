@@ -19,7 +19,7 @@ allocations, and a field for it would be a field somebody could edit.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -292,17 +292,65 @@ class AppointmentResponse(BaseModel):
     patient_id: uuid.UUID
     dentist_user_id: uuid.UUID | None
     scheduled_on: date
+    #: Time of day in the clinic's own zone, or `null` for "that day". Not an
+    #: instant: the clinic books "Tuesday at three" (`app.core.clock`).
+    scheduled_at: time | None = None
     duration_minutes: int | None
     status: AppointmentStatus
     reason: str | None
     cancelled_reason: str | None
 
 
+class AppointmentRow(AppointmentResponse):
+    """A booking with the names the day's list has to show.
+
+    Resolved on the server: a list of patient ids is not a list anybody can
+    read, and fetching each patient from the browser would be a request per
+    row.
+    """
+
+    patient_code: str
+    patient_name: str
+    patient_phone: str | None
+    dentist_name: str | None
+    #: The visit opened against this booking, where there is one.
+    encounter_id: uuid.UUID | None
+
+
+class DentistRow(BaseModel):
+    """A dentist a booking may be given to, and nothing else about them.
+
+    The appointment form needs the handful of people who can be put in a
+    chair, which is not the same thing as the user directory: reception
+    books the day and may not read staff e-mail addresses, roles or sign-in
+    history. So this carries a name and an id, both of which already appear
+    in the day's list (`AppointmentRow.dentist_name`), and is read with
+    `clinic.appointment.read` rather than `identity.user.read`.
+    """
+
+    id: uuid.UUID
+    full_name: str
+
+
 class AppointmentCreateRequest(BaseModel):
     patient_id: uuid.UUID
     scheduled_on: date
+    #: The clinic's own time of day. Optional, because the register books
+    #: plenty of patients for a day rather than an hour — and a booking with
+    #: no time cannot clash with anything.
+    scheduled_at: time | None = None
     dentist_user_id: uuid.UUID | None = None
     duration_minutes: int | None = Field(default=None, ge=5, le=480)
+    reason: str | None = None
+
+
+class AppointmentRescheduleRequest(BaseModel):
+    """Move a booking. The same appointment, at another time."""
+
+    scheduled_on: date
+    scheduled_at: time | None = None
+    duration_minutes: int | None = Field(default=None, ge=5, le=480)
+    dentist_user_id: uuid.UUID | None = None
     reason: str | None = None
 
 

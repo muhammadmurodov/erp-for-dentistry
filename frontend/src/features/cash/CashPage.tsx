@@ -37,6 +37,7 @@ import type {
   MovementKind,
   SessionStatus,
 } from '@/lib/types'
+import { RefundDialog } from '@/features/sales/RefundDialog'
 
 function StatusBadge({ status }: { status: SessionStatus }) {
   const { t } = useI18n()
@@ -236,6 +237,10 @@ function SessionDetail({
   const [expenseOpen, setExpenseOpen] = useState(false)
   const [depositOpen, setDepositOpen] = useState(false)
   const [countOpen, setCountOpen] = useState(false)
+  const [refundPaymentId, setRefundPaymentId] = useState<string | null>(null)
+  // Approval authority, or the request side of it where the clinic has
+  // declared it cannot separate duties — the same test the server makes.
+  const mayRefund = can('sales.refund.approve') || can('sales.refund.request')
 
   const close = useMutation({
     mutationFn: () =>
@@ -347,6 +352,7 @@ function SessionDetail({
                 <Th>{t.cash.kind}</Th>
                 <Th>{t.cash.description}</Th>
                 <Th numeric>{t.cash.amount}</Th>
+                <Th>{t.common.actions}</Th>
               </tr>
             </thead>
             <tbody>
@@ -356,12 +362,39 @@ function SessionDetail({
                   <Td>{kindLabel[movement.kind]}</Td>
                   <Td>{movement.description ?? '—'}</Td>
                   <Td numeric>{movement.amount}</Td>
+                  <Td>
+                    {/* The money that came in is the money that can go back
+                        out, so the refund starts from the receipt itself —
+                        no payment to look up and no number to copy. */}
+                    {isOpen &&
+                    movement.kind === 'RECEIPT' &&
+                    movement.payment_id !== null &&
+                    mayRefund ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setRefundPaymentId(movement.payment_id)}
+                      >
+                        {t.refunds.openRefund}
+                      </Button>
+                    ) : null}
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
         )}
       </Card>
+
+      <RefundDialog
+        paymentId={refundPaymentId}
+        openSessionId={isOpen ? sessionId : null}
+        onClose={() => setRefundPaymentId(null)}
+        onDone={(message) => {
+          setRefundPaymentId(null)
+          onChanged(message)
+        }}
+      />
 
       <TakePaymentDialog
         open={paymentOpen}

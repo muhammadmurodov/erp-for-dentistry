@@ -42,6 +42,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import clinic_today
 from app.core.errors import Conflict, ValidationFailed
 from app.core.money import ZERO, quantize
 from app.modules.audit import events
@@ -259,7 +260,7 @@ class SettlementService:
         if not request_key or not request_key.strip():
             raise ValidationFailed("A settlement submission needs a request key")
         request_key = request_key.strip()
-        on = received_on or date.today()
+        on = received_on or clinic_today()
 
         # 1 — claim the key.
         reservation, earlier = await self._claim(

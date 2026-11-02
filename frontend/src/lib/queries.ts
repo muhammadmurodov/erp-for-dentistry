@@ -1,7 +1,10 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { api } from './api'
 import type {
+  Appointment,
+  ClinicDentist,
   DuplicateReviewDetail,
+  RefundabilityView,
   Encounter,
   TodayView,
   TreatmentItem,
@@ -79,6 +82,10 @@ export const queryKeys = {
     ['sales', 'payments', filters] as const,
   payment: (id: string) => ['sales', 'payment', id] as const,
   ageing: (asOf: string) => ['sales', 'ageing', asOf] as const,
+  appointments: (filters: Record<string, unknown>) =>
+    ['clinic', 'appointments', filters] as const,
+  clinicDentists: ['clinic', 'dentists'] as const,
+  refundability: (paymentId: string) => ['sales', 'refundability', paymentId] as const,
   cashRegisters: ['cash', 'registers'] as const,
   cashSessions: (filters: Record<string, unknown>) =>
     ['cash', 'sessions', filters] as const,
@@ -363,6 +370,26 @@ export function useReceivablesAgeing(
 }
 
 
+/**
+ * What of a payment may still be given back.
+ *
+ * Never cached: another cashier may have refunded something a minute ago, and
+ * a stale figure would offer money that is no longer there.
+ */
+export function useRefundability(
+  paymentId: string | null,
+): UseQueryResult<RefundabilityView> {
+  return useQuery({
+    queryKey: queryKeys.refundability(paymentId ?? ''),
+    queryFn: () =>
+      api.get<RefundabilityView>(`/sales/payments/${paymentId}/refundability`),
+    enabled: Boolean(paymentId),
+    staleTime: 0,
+    gcTime: 0,
+  })
+}
+
+
 // --- cash -------------------------------------------------------------------
 
 export function useCashRegisters(
@@ -508,6 +535,44 @@ export function useDuplicateReviews(
     queryFn: () =>
       api.get<DuplicateReviewDetail[]>('/clinic/duplicate-reviews'),
     enabled,
+  })
+}
+
+/**
+ * The day's bookings, or one patient's history of them.
+ *
+ * Short-lived: in a clinic of three the same screen is open on two machines,
+ * and a slot somebody has just taken must not still look free.
+ */
+export function useAppointments(
+  enabled: boolean,
+  filters: { on?: string; patient_id?: string } = {},
+): UseQueryResult<Appointment[]> {
+  return useQuery({
+    queryKey: queryKeys.appointments(filters),
+    queryFn: () => api.get<Appointment[]>('/clinic/appointments', filters),
+    enabled,
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
+  })
+}
+
+
+/**
+ * The people a booking may be given to.
+ *
+ * Not `useOrganizationUsers`: that needs `identity.user.read`, which
+ * reception does not hold, and the form that could not name a dentist was
+ * the form nobody could book with. Behind `clinic.appointment.read`, like
+ * the day it is drawn beside. The clinic has three of these; it rarely
+ * changes, so it is cached for the session.
+ */
+export function useClinicDentists(enabled: boolean): UseQueryResult<ClinicDentist[]> {
+  return useQuery({
+    queryKey: queryKeys.clinicDentists,
+    queryFn: () => api.get<ClinicDentist[]>('/clinic/dentists'),
+    enabled,
+    staleTime: 300_000,
   })
 }
 

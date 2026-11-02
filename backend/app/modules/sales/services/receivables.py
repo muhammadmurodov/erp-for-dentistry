@@ -15,6 +15,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import clinic_today
 from app.core.money import ZERO, quantize
 from app.modules.sales.enums import OPEN_INVOICE_STATUSES
 from app.modules.sales.models import Customer, Invoice, PaymentAllocation
@@ -77,7 +78,7 @@ class ReceivablesService:
         as_of: date | None = None,
         currency: str = "UZS",
     ) -> AgeingReport:
-        as_of = as_of or date.today()
+        as_of = as_of or clinic_today()
 
         # One query for the invoices, one for their allocations: the
         # alternative is a per-invoice round trip, which grows with the ledger.

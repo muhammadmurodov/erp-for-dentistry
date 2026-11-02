@@ -808,6 +808,85 @@ export interface TreatmentItem {
   corrected_by_item_id: string | null
 }
 
+export type AppointmentStatusValue =
+  | 'SCHEDULED'
+  | 'CONFIRMED'
+  | 'ARRIVED'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'NO_SHOW'
+
+/**
+ * A booking, with the names the day's list has to show.
+ *
+ * `scheduled_on` and `scheduled_at` are a local date and a local time in the
+ * clinic's own zone — not an instant. Putting them through a timezone
+ * conversion would move the appointment.
+ */
+export interface Appointment {
+  id: string
+  patient_id: string
+  dentist_user_id: string | null
+  scheduled_on: string
+  /** `HH:MM:SS`, or `null` for "that day". */
+  scheduled_at: string | null
+  duration_minutes: number | null
+  status: AppointmentStatusValue
+  reason: string | null
+  cancelled_reason: string | null
+  patient_code: string
+  patient_name: string
+  patient_phone: string | null
+  dentist_name: string | null
+  /** The visit opened against this booking, where there is one. */
+  encounter_id: string | null
+}
+
+/**
+ * Somebody a booking may be given to.
+ *
+ * Deliberately thin: the appointment form needs the people who sit in the
+ * chairs, and reception — who books the day — may not read the staff
+ * directory. The server answers a name and an id, both of which already
+ * appear in the day beside the form.
+ */
+export interface ClinicDentist {
+  id: string
+  full_name: string
+}
+
+/** One partial refund of a payment. */
+export interface PaymentRefundRow {
+  id: string
+  number: string
+  payment_id: string
+  amount: string
+  currency: string
+  refunded_on: string
+  reason: string
+  self_approved: boolean
+}
+
+/**
+ * What of a payment may still be given back.
+ *
+ * Every figure is derived on the server from the payment, its allocations and
+ * its previous refunds — never worked out in the browser, because a stale
+ * figure would offer money that is no longer there.
+ */
+export interface RefundabilityView {
+  payment: Payment
+  amount: string
+  allocated: string
+  refunded: string
+  refundable: string
+  currency: string
+  may_refund: boolean
+  /** True where the money has to come out of an open cash drawer. */
+  needs_cash_session: boolean
+  refunds: PaymentRefundRow[]
+}
+
 export interface PatientBalance {
   customer_id: string | null
   invoiced: string
