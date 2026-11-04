@@ -252,9 +252,34 @@ MODULES: tuple[ModuleInfo, ...] = (
     ModuleInfo(
         key="payroll",
         phase=5,
-        status=ModuleStatus.PLANNED,
+        # PARTIAL, and for a reason the clinic can act on rather than wait
+        # for: the calculation, the approval chain and the posting are all
+        # built and tested, but a run cannot be approved or posted until an
+        # accountant approves the statutory rates it needs. The social tax
+        # rate could not be verified during the workbook audit
+        # (OPEN_QUESTIONS P2), so nothing is seeded with it and every run is
+        # blocked on it today. That is the control working.
+        status=ModuleStatus.PARTIAL,
         required_permission="payroll.run.read",
-        missing_features=("compensation rules", "payroll runs", "approval", "payslips"),
+        available_features=(
+            "statutory rates as dated, approved rules with their legal reference",
+            "salary agreements per employee, a rise being a new row",
+            "salary prorated by days actually worked, from the timesheet",
+            "employee deductions and employer contributions kept apart",
+            "bonuses and agreed deductions, each requiring a reason",
+            "calculating, approving, posting and paying as four separate acts",
+            "the person who calculated a run cannot approve it",
+            "payslips that keep their own amounts, rates and rule versions",
+            "one accounting entry per run, from the clinic's own posting rules",
+        ),
+        missing_features=(
+            "posting is blocked until the statutory rates are approved — the "
+            "social tax rate is unconfirmed (OPEN_QUESTIONS P2)",
+            "2018's progressive income tax, whose calculation is missing from "
+            "the workbook entirely (OPEN_QUESTIONS P10)",
+            "percentage and commission pay, which needs P3 answered",
+            "the statutory payroll reports and certificates",
+        ),
     ),
     ModuleInfo(
         key="accounting",

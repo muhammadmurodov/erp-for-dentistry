@@ -536,6 +536,30 @@ def attendance(db: AsyncSession, audit: AuditRecorder):
     return AttendanceService(db, audit)
 
 
+# --- payroll fixtures -------------------------------------------------------
+
+
+@pytest.fixture
+def payroll_rules(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.payroll.services.policy import StatutoryRuleService
+
+    return StatutoryRuleService(db, audit)
+
+
+@pytest.fixture
+def compensation(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.payroll.services.policy import CompensationService
+
+    return CompensationService(db, audit)
+
+
+@pytest.fixture
+def payroll(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.payroll.services.runs import PayrollRunService
+
+    return PayrollRunService(db, audit)
+
+
 # --- inventory fixtures -----------------------------------------------------
 
 

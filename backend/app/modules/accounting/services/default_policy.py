@@ -48,6 +48,8 @@ class DefaultRule:
 #: 5010 cash in hand · 5110.01 bank current account
 #: 5110.03 card settlement transit · 6010 supplier payable
 #: 6310 advances received · 9030 revenue · 9420 administrative expense
+#: 6411 income tax payable · 6520.01 social tax payable · 6520.02 INPS
+#: 6520.03 employee pension payable · 6710 wages payable to staff
 DEFAULT_RULES: tuple[DefaultRule, ...] = (
     DefaultRule(
         operation_code="invoice_issued",
@@ -351,6 +353,104 @@ DEFAULT_RULES: tuple[DefaultRule, ...] = (
             "Workbook row 'Аванс ҳисобга олинди' posts 6010/4310 exactly. "
             "Clearing an advance moves it from a receivable to a settled "
             "payable; no cash moves and no expense is recognised again."
+        ),
+    ),
+    # --- payroll ---------------------------------------------------------
+    # Every pair below is read straight off the workbook's own
+    # `Учетная_политика` sheet, which already carried payroll operations
+    # (rows 32-43). They are seeded as a draft like everything else: the
+    # accounts are the clinic's, the approval is still an accountant's.
+    DefaultRule(
+        operation_code="payroll_wages_accrued",
+        description="Wages accrued for the period — an expense and a debt to staff",
+        description_uz="Hisoblangan ish haqi — xarajat va xodim oldidagi qarz",
+        description_ru="Начислена заработная плата — расход и долг перед работником",
+        debit="9420",
+        credit="6710",
+        source_note=(
+            "Workbook row 34 'Иш ҳаққи ҳисобланиши: Администрация' posts "
+            "9420/6710. Row 32 uses 2010 for staff working in main activity; "
+            "a three-person clinic books its wages as administrative expense, "
+            "and an accountant may add the 2010 variant if that changes."
+        ),
+    ),
+    DefaultRule(
+        operation_code="payroll_income_tax_withheld",
+        description="Income tax withheld from wages — owed to the budget, not to staff",
+        description_uz="Ish haqidan ushlab qolingan daromad solig'i",
+        description_ru="Удержан налог на доходы из заработной платы",
+        debit="6710",
+        credit="6411",
+        source_note=(
+            "Workbook row 36 'Иш ҳаққи ҳисобланиши: Даромад солиғи' posts "
+            "6710/6411. The debit reduces what is owed to the employee, "
+            "which is what withholding means."
+        ),
+    ),
+    DefaultRule(
+        operation_code="payroll_inps_withheld",
+        description="The INPS component moved from income tax to the pension account",
+        description_uz="INPS ulushi daromad solig'idan jamg'arma hisobiga o'tkazildi",
+        description_ru="Часть НДФЛ направлена на индивидуальный пенсионный счёт",
+        debit="6411",
+        credit="6520.02",
+        source_note=(
+            "Workbook row 37 'Иш ҳаққи ҳисобланиши: ИНПС' posts 6411/6520.02 "
+            "— out of the income tax payable, not out of the employee's pay. "
+            "This is the clinic's own evidence that the 0.1 percentage point "
+            "is part of the 12% rather than an extra deduction."
+        ),
+    ),
+    DefaultRule(
+        operation_code="payroll_social_tax_accrued",
+        description="Social tax on the payroll — the employer's own cost",
+        description_uz="Ish haqi bo'yicha ijtimoiy soliq — ish beruvchi xarajati",
+        description_ru="Начислен социальный налог — расход работодателя",
+        debit="9420",
+        credit="6520.01",
+        source_note=(
+            "Workbook row 35 'Иш ҳаққи ҳисобланиши: Администрация-ЕСП' posts "
+            "9420/6520.01. It never touches 6710, which is why it can never "
+            "reduce what an employee is paid."
+        ),
+    ),
+    DefaultRule(
+        operation_code="payroll_employee_pension_withheld",
+        description="Employee pension contribution withheld (abolished from 2019)",
+        description_uz="Xodimning pensiya badali ushlab qolindi (2019 dan bekor)",
+        description_ru="Удержан пенсионный взнос работника (отменён в 2019 году)",
+        debit="6710",
+        credit="6520.03",
+        source_note=(
+            "Workbook row 43 'Иш ҳаққи ҳисобланиши: СВГПФ-8%' posts "
+            "6710/6520.03. Kept for periods before 2019-01-01, when the "
+            "contribution was abolished; no current run produces this line."
+        ),
+    ),
+    DefaultRule(
+        operation_code="payroll_paid_bank",
+        description="Wages paid from the bank account",
+        description_uz="Ish haqi bank hisobidan to'landi",
+        description_ru="Выплата заработной платы через банк",
+        debit="6710",
+        credit="5110.01",
+        source_note=(
+            "Workbook row 70 'Ишчининг иш ҳаққи ҳисобидан тўловлар' posts "
+            "6710/5110.01. Paying is a separate event from accruing: this "
+            "settles the debt the accrual created and recognises no expense."
+        ),
+    ),
+    DefaultRule(
+        operation_code="payroll_paid_cash",
+        description="Wages paid out of the till",
+        description_uz="Ish haqi kassadan to'landi",
+        description_ru="Заработная плата выплачена из кассы",
+        debit="6710",
+        credit="5010",
+        source_note=(
+            "As payroll_paid_bank, out of the drawer rather than the bank. "
+            "The workbook pays through a transit account to cards (rows "
+            "41-42); a clinic paying cash uses this."
         ),
     ),
 )

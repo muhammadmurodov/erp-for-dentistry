@@ -112,9 +112,23 @@ STOCK_COUNT_PROPOSED: Final = "inventory.count.proposed"
 #: The moment stock actually moves, by somebody who did not count it.
 STOCK_ADJUSTED: Final = "inventory.stock.adjusted"
 STOCK_COUNT_REJECTED: Final = "inventory.count.rejected"
+#: A statutory rate written down. Drafting is free; it calculates nothing.
+PAYROLL_RULE_PROPOSED: Final = "payroll.rule.proposed"
+#: Somebody with authority accepting a statutory rate as the one to apply.
+#: Audited because every payslip computed afterwards depends on it.
+PAYROLL_RULE_APPROVED: Final = "payroll.rule.approved"
+PAYROLL_RULE_SUPERSEDED: Final = "payroll.rule.superseded"
+#: What the clinic agreed to pay one person, from one date.
+COMPENSATION_SET: Final = "payroll.compensation.set"
 PAYROLL_CALCULATED: Final = "payroll.run.calculated"
 PAYROLL_APPROVED: Final = "payroll.run.approved"
 PAYROLL_POSTED: Final = "payroll.run.posted"
+PAYROLL_PAID: Final = "payroll.run.paid"
+PAYROLL_CANCELLED: Final = "payroll.run.cancelled"
+#: A bonus or a deduction for one person, which cannot be recorded without
+#: a reason — the control the workbook's nine undocumented corrections
+#: lacked (WORKBOOK_FORMULA_AUDIT.md, question P8).
+PAYROLL_ADJUSTED: Final = "payroll.adjustment.recorded"
 
 # --- clinic (Phase 3c) ------------------------------------------------------
 PATIENT_REGISTERED: Final = "clinic.patient.registered"
@@ -159,6 +173,8 @@ REQUIRED_AUDIT_ACTIONS: Final[frozenset[str]] = frozenset(
         STOCK_WRITTEN_OFF,
         PAYROLL_APPROVED,
         PAYROLL_POSTED,
+        PAYROLL_RULE_APPROVED,
+        PAYROLL_ADJUSTED,
         EMPLOYMENT_ENDED,
         PURCHASE_ORDER_APPROVED,
         SUPPLIER_INVOICE_REGISTERED,
