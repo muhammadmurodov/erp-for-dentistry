@@ -54,6 +54,16 @@ answer this completely.
 
 ---
 
+**What the system does meanwhile (2026-11-04).** Every *management* report
+is built and reconciles to the ledger: profit and loss, balance sheet,
+receivables and payables ageing, and a cash movement statement, each with
+comparative periods, drill-down to the entries behind any figure, and a
+spreadsheet export. The statutory **forms** are not built and are not
+guessed. `GET /reporting/catalogue` reports them as blocked, naming this
+question, and the Reports screen lists them with the same note (ADR-061).
+
+---
+
 ### A3 — Which cash flow method is required for filing? · Non-blocking
 **Needed from:** accountant
 
@@ -150,6 +160,17 @@ loudly rather than posting to a guessed account. A test asserts that failure
 rather than skipping it quietly.
 
 ---
+**What the system does meanwhile (2026-11-04).** The cash movement
+statement reports opening balance, every movement attributed to the other
+side of its own journal entry, and closing balance, and proves that opening
+plus movement equals closing. It does **not** sort those movements into
+operating, investing and financing, because that is this question; the screen
+says so rather than showing a split nobody has approved (ADR-059). When this
+is answered, the classification is a grouping over figures that are already
+correct.
+
+---
+
 ## B. Cash and banking
 
 ### B1 — Who may hold the cash register, and is there more than one? · Blocking Phase 3

@@ -1,6 +1,6 @@
 # Implementation status
 
-**Last updated:** 2026-11-04 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete; employees, purchasing and inventory built on top of them. A full module audit is in `MODULE_AUDIT.md`; payroll, reporting, documents and hardening are the remaining work.**
+**Last updated:** 2026-11-04 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete; employees, purchasing, inventory and management reporting built on top of them. A full module audit is in `MODULE_AUDIT.md`; payroll, documents and hardening are the remaining work.**
 
 The authoritative record of what works. The application serves the same
 information from `GET /api/v1/platform/modules`, and an integration test
@@ -11,11 +11,11 @@ asserts nothing beyond Phase 1 reports itself as `available`.
 Every figure below was produced by running the command shown, not estimated.
 
 ```
-backend:  864 passed, 2 skipped        .venv/bin/python -m pytest tests
+backend:  925 passed, 2 skipped        .venv/bin/python -m pytest tests
 lint:     All checks passed!       .venv/bin/ruff check app tests alembic
 schema:   No new upgrade operations detected.   alembic check
 migrate:  downgrade base -> upgrade head: clean (every test run)
-frontend: 216 passed (216)         npm test
+frontend: 242 passed (242)         npm test
           built in 1.14s           npm run build
           0 problems               npm run lint
           0 errors                 npm run typecheck
@@ -41,6 +41,10 @@ ui e2e:   Phase 1: 12 screens driven in Chrome, each inspected
           Inventory: 11 steps — the shelf, the refusal, the count and
                     the separation — 0 problems, run twice
                     (frontend/e2e/inventory.cjs)
+          Reports:  11 steps — every statement against the ledger,
+                    the drill-down, the export and the blocked forms
+                    — 0 problems, run twice
+                    (frontend/e2e/reports.cjs)
           Re-run after each increment: clinic, refunds, appointments,
                     plans, employees — all 0 problems
           Appointments: 15 steps driven in Chrome, 0 console errors
@@ -1371,6 +1375,86 @@ What the stock is worth is undeclared (`OPEN_QUESTIONS` I1), so quantities
 are kept and value is refused; posting the cost of a material as it is used
 waits on the same answer; and FIFO is deliberately not implemented.
 
+
+## Management reporting · Built
+
+What an owner opens at the end of a month. Five reports, 11 endpoints, 61
+backend tests, and the correction of a placeholder that had been standing in
+front of two working reports since Phase 2.
+
+**A statement is the trial balance rearranged** (ADR-057). Profit and loss
+and the balance sheet are built from `ReportService.trial_balance()` — the
+same call the trial balance screen uses — grouped by account element and
+summed. Neither issues a ledger query of its own, so neither can disagree
+with the ledger, and the balance sheet's result for the year equals the
+profit and loss's net result because they are the same rows. Both properties
+are asserted rather than assumed.
+
+**Nothing is classified silently** (ADR-058). The seeded chart is
+unconfirmed while `OPEN_QUESTIONS.md` A1 is open, and an account may carry no
+element at all. Such an account is reported in its own `unclassified`
+section and counted, never folded into revenue to make the statement tidy —
+dropping it would balance the statement by losing money, and guessing where
+it belongs would invent a statutory classification. The balance sheet
+returns `balances` and `difference`, and when it does not balance the screen
+says so in red rather than rounding it away.
+
+**Cash is what the clinic configured** (ADR-059). The cash statement's
+accounts are the ledger accounts its own tills and bank accounts are
+attached to, not a guessed account range. Movements are attributed to the
+other side of their own entry and grouped by that account; they are
+deliberately **not** split into operating, investing and financing, because
+which method a filing requires is A3 and unanswered — and the screen says
+so. A transfer between two cash accounts is excluded, since it changes no
+total.
+
+**Statutory forms stay blocked, and say why** (ADR-061). `GET
+/reporting/catalogue` is the backend's own statement of what this build can
+produce; the screen renders it rather than a hand-written list. The three
+blocked reports name the question blocking each: A2 for the statutory
+statement forms, A3 for the statutory cash flow, A5 for a VAT return.
+
+### What a user can actually do
+
+- Run profit and loss over any window, with named periods (this month, last
+  month, this quarter, year to date, last year) or chosen dates, and compare
+  it with the same window a year earlier.
+- Run a balance sheet as at any date, with the same day a year earlier
+  beside it.
+- See what patients owe and what the clinic owes suppliers, aged, from the
+  same services those modules' own screens use — not a second implementation.
+- See what came in and went out, and what each movement was for.
+- **Click any line and read the entries behind it**, over the window the
+  report covers, behind the same permission as the report itself.
+- Download any report as a spreadsheet, or print it — the print stylesheet
+  drops the shell and forces black on white, so "Save as PDF" is a clean
+  page (ADR-060).
+
+### How far this is verified
+
+- 61 backend tests across `tests/reporting/`: empty windows, both ends of a
+  window, a day either side, drafts excluded, a voided invoice netting to
+  nothing, partial payments, advances as a liability rather than revenue, a
+  closed period reporting identically to before it closed, tenant isolation,
+  reconciliation against the trial balance, the cash statement reconciling,
+  every route swept for the permission, the catalogue's blocked entries, and
+  that the downloaded workbook is a real workbook carrying the figures.
+- 26 frontend unit tests over period arithmetic — quarters, year boundaries,
+  29 February stepping back to the 28th — exact variance in minor units, and
+  reading the capability catalogue.
+- `frontend/e2e/reports.cjs`: 11 steps in a real Chrome, 0 problems, run
+  twice — it bills a patient a known amount and then checks every statement
+  moved by exactly that much, with the trial balance read alongside as a
+  second opinion. It fails if the page ever shows a "not developed" message
+  again.
+
+### Why it still reports `partial`
+
+The statutory filing forms are not built and are not guessed: their formats
+and line mappings are `OPEN_QUESTIONS.md` A2, the cash flow method is A3,
+and a VAT return depends on A5. Every *management* report a clinic runs is
+built and reconciles to the ledger.
+
 ## Next step
 
 The order comes from `docs/MODULE_AUDIT.md`, which audited all thirteen
@@ -1383,8 +1467,8 @@ modules against the code rather than against this document:
    line is produced only from an approved, versioned rule, and a run holding
    an unapproved one refuses to post and names it. `P2` and `P3` stay
    unanswered and nothing is guessed.
-5. **Reports** — internal management reports, derived from the ledger.
-   Statutory filing forms stay blocked on `A2` and `A3`.
+5. ~~**Reports**~~ — done, above. Statutory filing forms stay blocked on
+   `A2` and `A3`.
 6. **Documents** — deliberately late: it attaches to records that must exist.
 7. **Dashboard and navigation integration**, then **hardening**: component
    tests, the browser passes promoted into CI, concurrency and idempotency

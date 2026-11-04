@@ -35,6 +35,7 @@ from app.api.routers import (
     organizations,
     platform,
     purchasing,
+    reporting,
     sales,
     users,
 )
@@ -189,6 +190,7 @@ def create_app() -> FastAPI:
         banking.router,
         inventory.router,
         purchasing.router,
+        reporting.router,
         hr.router,
         organizations.router,
         users.router,

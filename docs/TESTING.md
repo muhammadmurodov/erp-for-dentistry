@@ -2,14 +2,15 @@
 
 ## Current state
 
-**866 backend tests and 216 frontend tests: 864 passed, 2 skipped
+**927 backend tests and 242 frontend tests: 925 passed, 2 skipped
 deliberately, 0 failed** (the two skips are explained below). Verified counts,
 from `pytest tests -q` and `vitest run`, last re-run 2026-11-04.
 
 The table below lists the suites that carry a rule worth naming; it is not
 the full file list. Three modules built since it was last extended —
-`tests/hr/` (85), `tests/purchasing/` (70) and `tests/inventory/` (73) — are
-summarised at the end of it rather than line by line.
+`tests/hr/` (85), `tests/purchasing/` (70), `tests/inventory/` (73) and
+`tests/reporting/` (61) — are summarised at the end of it rather than line
+by line.
 
 | Suite | Tests | Covers |
 | --- | --- | --- |
@@ -47,6 +48,7 @@ summarised at the end of it rather than line by line.
 | `tests/hr/` | 85 | The employment life cycle, every illegal transition, the login-link rules, attendance refusals, the month grid's year boundary, and who may reach each endpoint |
 | `tests/purchasing/` | 70 | That an order and a delivery post nothing, that a delivery line cannot be billed twice, the segregation refusals, partial payment, advances, ageing, and paying a supplier from the till |
 | `tests/inventory/` | 73 | That a balance is a sum and not a column, that no route can take a shelf below zero, that a consumption posts nothing, batches and expiry, low stock, and a count that only moves stock when somebody who did not count it approves (ADR-052 to ADR-055) |
+| `tests/reporting/` | 61 | That a statement cannot disagree with the trial balance it came from; empty windows, both ends of a window, drafts excluded, a void netting to nothing, advances as a liability, a closed period reporting identically, the cash statement reconciling, every route swept for its permission, and that the downloaded workbook carries the figures (ADR-057 to ADR-061) |
 
 | Frontend suite | Tests | Covers |
 | --- | --- | --- |
@@ -59,6 +61,7 @@ summarised at the end of it rather than line by line.
 | `src/lib/plans.test.ts` | 14 | The transition table a course of treatment offers, and what it refuses to offer |
 | `src/lib/employees.test.ts` | 19 | The employment transition table and the calendar arithmetic the timesheet grid uses |
 | `src/lib/purchasing.test.ts` | 16 | Order and bill states, and money summed in integer minor units |
+| `src/lib/reports.test.ts` | 26 | Period arithmetic a day out is a defect an accountant finds: quarters, year boundaries, 29 February stepping back to the 28th; exact variance in minor units; growth from nothing refusing to be a percentage; and reading the backend's capability catalogue rather than deciding for itself (ADR-061) |
 | `src/lib/inventory.test.ts` | 29 | Quantity arithmetic at four decimal places — which money's two would truncate — the expiry grading, the count difference, who may approve a count, and that a stored `10.0000` is shown to a clinic as ten (ADR-056) |
 
 **Two tests skip, and say why.** `test_a_written_off_bill_takes_no_payment`
@@ -327,7 +330,7 @@ Stated plainly:
 ## Manual browser verification
 
 The interface has been driven end to end in a real Chrome via Playwright and
-each screen inspected, across fourteen passes:
+each screen inspected, across fifteen passes:
 
 * **Phase 1** — login, a rejected sign-in, the dashboard, a not-built-yet
   module page, the four settings tabs, the role dialog refusing a
@@ -410,6 +413,16 @@ each screen inspected, across fourteen passes:
   count that moves nothing until approved, and the owner who counted being
   offered no approve button and refused by the server when they try anyway.
   `frontend/e2e/inventory.cjs`, run twice in a row.
+
+* **Reports** — a patient billed a known amount, then every statement
+  checked to have moved by exactly that much with the trial balance read
+  alongside; the comparative columns; drilling from a line into its entries;
+  a balance sheet that balances and does not show the unbalanced warning; the
+  ageing report agreeing with the sales module's own figure; the cash
+  statement reconciling; the blocked statutory forms listed with A2, A3 and
+  A5; a spreadsheet downloaded and checked to be a real workbook; the cashier
+  refused; and the page at phone width in Uzbek. `frontend/e2e/reports.cjs`,
+  run twice in a row.
 
 Each run asserts there are no unexpected console errors or failed requests.
 The Phase 3d and 3c scripts additionally fail on a page wider than its

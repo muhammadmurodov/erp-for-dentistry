@@ -286,9 +286,29 @@ export async function request<T>(
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+/**
+ * A download, with the same token handling and the same error envelope.
+ *
+ * A report export is an ordinary authorised request that happens to return a
+ * spreadsheet, so it goes through `performRequest` like everything else
+ * rather than through a bare `fetch` that would miss the token refresh — and
+ * a failure still arrives as a typed `ApiError`, because a 403 on a download
+ * must read like a 403 anywhere else.
+ */
+export async function requestBlob(
+  path: string,
+  options: RequestOptions = {},
+): Promise<Blob> {
+  const response = await performRequest(path, options, false)
+  if (!response.ok) throw await parseError(response)
+  return response.blob()
+}
+
 export const api = {
   get: <T>(path: string, query?: RequestOptions['query'], signal?: AbortSignal) =>
     request<T>(path, { method: 'GET', query, signal }),
+  getBlob: (path: string, query?: RequestOptions['query']) =>
+    requestBlob(path, { method: 'GET', query }),
   post: <T>(path: string, body?: unknown, options?: Partial<RequestOptions>) =>
     request<T>(path, { method: 'POST', body, ...options }),
   patch: <T>(path: string, body?: unknown) =>

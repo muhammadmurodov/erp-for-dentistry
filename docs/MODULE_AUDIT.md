@@ -57,8 +57,8 @@ Legend: ● built and verified · ◐ partial · ○ absent
 | 7 | Inventory | ● | ● | ● | ● | ◐ valuation (I1) |
 | 8 | Employees | ● | ● | ● | ● | ◐ statutory timesheet |
 | 9 | Payroll | ○ | ○ | ○ | ○ | ○ |
-| 10 | Accounting | ● | ● | ● | ● | ◐ statements |
-| 11 | Reports | ◐ | n/a | ◐ | ◐ | ◐ no P&L/BS/CF |
+| 10 | Accounting | ● | ● | ● | ● | ◐ asset accounting |
+| 11 | Reports | ● | n/a | ● | ● | ◐ statutory forms (A2, A3) |
 | 12 | Documents | ○ | ○ | ○ | ○ | ○ |
 | 13 | Settings | ◐ | ● | ◐ | ◐ | ◐ policy, numbering |
 
@@ -269,8 +269,8 @@ missing capability), numbering sequences, payment settings, custom role editing.
 | 2 | Employees — records, positions, rota, timesheet | **Done**, 2026-11-03 |
 | 3 | Purchasing | **Done**, 2026-11-03 |
 | 4 | Inventory | **Done**, 2026-11-04 |
-| 5 | Payroll | Next |
-| 6 | Reports | |
+| 5 | Payroll | |
+| 6 | Reports | **Done**, 2026-11-04 (taken before payroll, at the owner's request) |
 | 7 | Documents | |
 | 8 | Dashboard and navigation | |
 | 9 | Hardening | |

@@ -281,14 +281,33 @@ MODULES: tuple[ModuleInfo, ...] = (
     ModuleInfo(
         key="reports",
         phase=6,
+        # PARTIAL, and the reason is now a narrow one. Every *management*
+        # report a clinic runs is built and reconciles to the ledger. What is
+        # missing is the statutory filing forms, which stay blocked until an
+        # accountant confirms the formats and their account mappings
+        # (OPEN_QUESTIONS A2 and A3), and anything VAT-dependent (A5).
+        # `GET /reporting/catalogue` serves this same answer to the screen,
+        # so the two can never drift apart.
         status=ModuleStatus.PARTIAL,
         required_permission="reporting.financial.read",
-        available_features=("trial balance", "account statement"),
+        available_features=(
+            "profit and loss, with a comparative period",
+            "balance sheet, which says whether it balanced",
+            "patient receivables, by how overdue they are",
+            "supplier payables, by how overdue they are",
+            "cash movement: what came in, what went out, and what for",
+            "trial balance",
+            "account statement, reached by drilling into any report line",
+            "every report as a spreadsheet, and as a printable page",
+        ),
         missing_features=(
-            "balance sheet",
-            "profit and loss",
-            "cash flow statement",
-            "receivables and payables ageing",
+            "statutory financial statement forms — the formats and their line "
+            "mappings are unconfirmed (OPEN_QUESTIONS A2)",
+            "the statutory cash flow statement: direct or indirect is "
+            "unanswered (OPEN_QUESTIONS A3), so movements are reported "
+            "without that classification",
+            "a VAT return, which depends on whether dental services bear VAT "
+            "at all (OPEN_QUESTIONS A5)",
         ),
     ),
     ModuleInfo(

@@ -1475,3 +1475,121 @@ export interface StockValuation {
   rows: ValuationRow[]
 }
 
+// --- reporting --------------------------------------------------------------
+
+export interface StatementLine {
+  account_id: string
+  account_code: string
+  account_name: string
+  element: AccountElement | null
+  amount: string
+  debit: string
+  credit: string
+  /** The chart has not confirmed this account's statutory classification. */
+  needs_confirmation: boolean
+}
+
+export interface StatementSection {
+  key: string
+  lines: StatementLine[]
+  total: string
+}
+
+export interface ProfitAndLoss {
+  from_date: string
+  to_date: string
+  currency: string
+  revenue: StatementSection
+  expenses: StatementSection
+  /** Accounts with a balance the chart has not classified, never folded in. */
+  unclassified: StatementSection
+  net_result: string
+  accounts_needing_confirmation: number
+  comparative: ProfitAndLoss | null
+}
+
+export interface BalanceSheet {
+  as_of: string
+  currency: string
+  assets: StatementSection
+  liabilities: StatementSection
+  equity: StatementSection
+  unclassified: StatementSection
+  result_for_the_year: string
+  total_assets: string
+  total_liabilities_and_equity: string
+  difference: string
+  /** False means the statement does not balance, and it says so out loud. */
+  balances: boolean
+  accounts_needing_confirmation: number
+  fiscal_year_starts_on: string | null
+  comparative: BalanceSheet | null
+}
+
+export interface CashAccountRow {
+  account_id: string
+  account_code: string
+  account_name: string
+  opening: string
+  movement: string
+  closing: string
+}
+
+export interface CashFlowLine {
+  account_id: string
+  account_code: string
+  account_name: string
+  element: AccountElement | null
+  amount: string
+}
+
+export interface CashFlowReport {
+  from_date: string
+  to_date: string
+  currency: string
+  opening_balance: string
+  closing_balance: string
+  total_in: string
+  total_out: string
+  net_movement: string
+  difference: string
+  reconciles: boolean
+  cash_accounts: CashAccountRow[]
+  inflows: CashFlowLine[]
+  outflows: CashFlowLine[]
+  no_cash_accounts_configured: boolean
+}
+
+export interface PayablesAgeingRow {
+  supplier_id: string
+  supplier_name: string
+  current: string
+  days_1_30: string
+  days_31_60: string
+  days_61_90: string
+  days_over_90: string
+  total: string
+}
+
+export interface PayablesAgeingReport {
+  as_of: string
+  currency: string
+  rows: PayablesAgeingRow[]
+  total_outstanding: string
+  no_suppliers_yet: boolean
+}
+
+/** One report, and whether this build can actually produce it. */
+export interface ReportCapability {
+  key: string
+  available: boolean
+  /** The open question blocking it, where one does: "A2", "A3", "A5". */
+  blocked_by: string | null
+  statutory: boolean
+}
+
+export interface ReportCatalogue {
+  reports: ReportCapability[]
+  accounts_needing_confirmation: number
+  chart_unconfirmed: boolean
+}

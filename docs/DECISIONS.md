@@ -1740,3 +1740,143 @@ The display half of this was a real defect, found by driving the screen
 rather than by any test: the shelf read **"10.0000 box"** where the clinic
 counts ten boxes.
 
+## ADR-057 — A statement is derived from the trial balance, never stored
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** Profit and loss and the balance sheet could each query the
+ledger their own way. If they did, three reports would answer the same
+question by three routes, and the day they disagreed nobody would know which
+one to believe.
+
+**Decision — both statements are built from `ReportService.trial_balance()`,
+the same call the trial balance screen uses.** A statement groups its rows by
+`AccountElement` and sums them; it issues no ledger query of its own. The
+trial balance already excludes drafts and already proves it balances, so both
+properties come along for free.
+
+Two consequences follow, and both are asserted by tests. A statement cannot
+disagree with the trial balance, because it *is* the trial balance rearranged.
+And the balance sheet's result for the year equals the profit and loss's net
+result for the same window, because the two numbers come from the same rows.
+
+`TrialBalanceRow` gained `needs_confirmation` for this: a statement has to
+say whether a classification is confirmed, and the row is where that fact
+belongs.
+
+**Consequences.** Reporting owns no SQL against the ledger. The one query it
+genuinely needed that accounting did not already expose — every posted line
+in a window, flat, so the cash statement can see both sides of an entry — was
+added to accounting as `entry_lines()` rather than written in reporting
+against tables it does not own. The architecture guard caught the first
+attempt, which imported `accounting.models` directly.
+
+## ADR-058 — Nothing is classified silently, and a statement says whether it balanced
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** The seeded chart of accounts is marked `needs_confirmation`
+while `OPEN_QUESTIONS.md` A1 is unanswered, and an account may carry no
+`element` at all. A statement meeting such an account has three options:
+drop it, guess where it goes, or show it.
+
+Dropping it makes the statement balance by losing money. Guessing invents a
+statutory classification, which is the one thing this project does not do.
+
+**Decision — show it, in its own section, and count it.** Every statement
+carries an `unclassified` section and an `accounts_needing_confirmation`
+count, and the screen marks each such line. The balance sheet additionally
+returns `balances` and `difference`, and when it does not balance the screen
+says so in its loudest available form rather than rounding the difference
+away.
+
+**Consequences.** A statement can look untidy, and that is the correct
+outcome: the untidiness is real and it points at a question somebody needs
+to answer. A tidy statement built by absorbing an unclassified account into
+revenue would be a lie that nobody could see.
+
+The same principle gives the cash statement its `reconciles` flag: opening
+plus movement must equal closing, and if it does not, the report says so.
+
+## ADR-059 — Cash is what the clinic configured, and its movements are not classified
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** A cash flow statement needs to know which accounts hold cash.
+The tempting answer is the statutory account range — anything beginning with
+5 — which would be inventing a classification while A1 is open.
+
+The second question is how to group the movements. The textbook answer is
+operating, investing and financing; which method a filing requires here is
+`OPEN_QUESTIONS.md` A3, unanswered.
+
+**Decision — cash is the set of ledger accounts the clinic's own tills and
+bank accounts are attached to.** A cash register names its account; a bank
+account names its account. That is configuration the clinic made, not a
+range this project guessed.
+
+**Movements are attributed to the other side of their own journal entry**, and
+grouped by that account, with no three-way split. Most entries have exactly
+two lines, so the attribution is exact; where an entry has several non-cash
+lines the cash is apportioned in proportion to their amounts — arithmetic
+over that entry's own figures, never a judgement about what a payment was
+for. A transfer between two cash accounts is excluded: it changes no total
+and belongs nowhere on a statement of what the money was for.
+
+**Consequences.** The statement answers "what came in, what went out, what
+for" exactly, and declines to answer "operating or investing" at all, saying
+so on the screen. When A3 is answered, the classification is a grouping over
+figures that are already correct.
+
+## ADR-060 — A spreadsheet from the server, a PDF from the browser
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** The reports have to leave the screen: an accountant wants the
+file. Excel is straightforward — `openpyxl` is already a dependency, used by
+the bank statement importer. PDF is not: it needs a layout engine, and the
+candidates are a large native dependency or a headless browser, both heavier
+than the problem a three-person clinic has.
+
+**Decision — export to `.xlsx` on the server, and print to PDF in the
+browser over a print stylesheet.** The spreadsheet writers take the report
+object the API already returned and lay it out; they query nothing, so the
+file holds the figures the screen was showing. The print stylesheet drops
+the shell, the tabs and every control, forces white paper and black ink even
+in dark mode, and keeps table rows from splitting across sheets.
+
+**Consequences.** No PDF dependency, and "Save as PDF" gives a clean page
+with the clinic's name, the period, and the same footnotes the screen
+carries. The limitation is real and stated: the layout is the browser's, so
+a filing form with a prescribed layout could not be produced this way — but
+those are blocked on A2 anyway, and will need their own answer when they are
+not.
+
+## ADR-061 — The reports screen renders the backend's catalogue of what it can report
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** The Reports page used to be a "module not developed yet"
+placeholder. That message was wrong in both directions: the trial balance and
+the account statement had worked since Phase 2 and were sitting behind it,
+and the statutory forms that genuinely cannot be produced were not mentioned
+at all, so nobody learned that they wait on an accountant's answer.
+
+A hand-written list in the frontend would fix today's version of the problem
+and recreate it the next time a report is added.
+
+**Decision — `GET /reporting/catalogue` answers what this build can produce**,
+including the blocked reports, each naming the open question that blocks it:
+A2 for the statutory statement forms, A3 for the statutory cash flow, A5 for
+a VAT return. The screen renders that answer, and lists the blocked ones at
+the foot of the page.
+
+**Consequences.** A report cannot be offered that does not exist, and a
+report that works cannot be hidden behind a placeholder. The module registry
+and this catalogue now say the same thing because both are generated from
+the same facts, and the browser pass fails if the page ever shows "not
+developed" again.
+
+This is the general lesson of ADR-049 and ADR-051 once more: the system
+should state what it can and cannot do, and the statement should be generated
+rather than written by hand, because a hand-written one goes stale silently.

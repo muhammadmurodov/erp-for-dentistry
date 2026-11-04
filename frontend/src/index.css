@@ -121,3 +121,63 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/*
+ * Printing a report.
+ *
+ * The PDF this project offers is the browser's own print-to-PDF over this
+ * stylesheet, rather than a second layout engine on the server (ADR-059).
+ * That makes the printed page the same figures the screen is showing, and
+ * it costs no dependency — but it only works if the page is actually laid
+ * out for paper, which is what this does: the shell, the tabs and every
+ * control disappear, and the statement itself fills the sheet.
+ */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  /* Paper is white and ink is expensive; a dark theme prints as a block. */
+  :root,
+  :root[data-theme='dark'] {
+    --surface: #ffffff;
+    --surface-sunken: #ffffff;
+    --text-primary: #000000;
+    --text-secondary: #000000;
+    --text-muted: #333333;
+    --border: #999999;
+    --border-subtle: #cccccc;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  /* The application shell is navigation, not content. */
+  aside,
+  header nav,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  /* A card is a screen affordance; on paper it is just the table. */
+  [data-card] {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* A row split across two sheets is a row somebody misreads. */
+  tr,
+  td,
+  th {
+    break-inside: avoid;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+}

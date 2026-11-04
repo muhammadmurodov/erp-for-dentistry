@@ -11,6 +11,8 @@ import type {
   AttendanceSummary,
   Employee,
   ExpiringRow,
+  BalanceSheet,
+  CashFlowReport,
   GoodsReceipt,
   InventoryCategory,
   InventoryItem,
@@ -22,7 +24,10 @@ import type {
   StockLocation,
   StockMovement,
   StockValuation,
+  PayablesAgeingReport,
   PayablesAgeingRow,
+  ProfitAndLoss,
+  ReportCatalogue,
   PurchaseOrder,
   PurchaseOrderDetail,
   Supplier,
@@ -150,6 +155,15 @@ export const queryKeys = {
   supplierPayments: (filters: Record<string, unknown>) =>
     ['purchasing', 'payments', filters] as const,
   payablesAgeing: ['purchasing', 'payables', 'ageing'] as const,
+  profitAndLoss: (filters: Record<string, unknown>) =>
+    ['reporting', 'profit-and-loss', filters] as const,
+  balanceSheet: (filters: Record<string, unknown>) =>
+    ['reporting', 'balance-sheet', filters] as const,
+  reportingReceivables: (asOf: string | null) =>
+    ['reporting', 'receivables', asOf] as const,
+  reportingPayables: (asOf: string | null) => ['reporting', 'payables', asOf] as const,
+  cashFlow: (filters: Record<string, unknown>) => ['reporting', 'cash-flow', filters] as const,
+  reportCatalogue: ['reporting', 'catalogue'] as const,
   inventoryItems: (filters: Record<string, unknown>) =>
     ['inventory', 'items', filters] as const,
   inventoryCategories: ['inventory', 'categories'] as const,
@@ -1098,3 +1112,80 @@ export function useTreatmentMaterials(
   })
 }
 
+// --- reporting --------------------------------------------------------------
+
+/**
+ * What this build can actually report, answered by the backend.
+ *
+ * The screen renders this rather than a list written here, so a report can
+ * never be offered that does not exist, and a blocked statutory form always
+ * names the question that blocks it.
+ */
+export function useReportCatalogue(enabled: boolean): UseQueryResult<ReportCatalogue> {
+  return useQuery({
+    queryKey: queryKeys.reportCatalogue,
+    queryFn: () => api.get<ReportCatalogue>('/reporting/catalogue'),
+    enabled,
+  })
+}
+
+export function useProfitAndLoss(
+  filters: { from_date: string; to_date: string; compare_from?: string; compare_to?: string },
+  enabled: boolean,
+): UseQueryResult<ProfitAndLoss> {
+  return useQuery({
+    queryKey: queryKeys.profitAndLoss(filters),
+    queryFn: () => api.get<ProfitAndLoss>('/reporting/profit-and-loss', filters),
+    enabled,
+  })
+}
+
+export function useBalanceSheet(
+  filters: { as_of: string; compare_as_of?: string },
+  enabled: boolean,
+): UseQueryResult<BalanceSheet> {
+  return useQuery({
+    queryKey: queryKeys.balanceSheet(filters),
+    queryFn: () => api.get<BalanceSheet>('/reporting/balance-sheet', filters),
+    enabled,
+  })
+}
+
+export function useReportingReceivables(
+  asOf: string | null,
+  enabled: boolean,
+): UseQueryResult<ReceivablesAgeing> {
+  return useQuery({
+    queryKey: queryKeys.reportingReceivables(asOf),
+    queryFn: () =>
+      api.get<ReceivablesAgeing>('/reporting/receivables-ageing', {
+        as_of: asOf ?? undefined,
+      }),
+    enabled,
+  })
+}
+
+export function useReportingPayables(
+  asOf: string | null,
+  enabled: boolean,
+): UseQueryResult<PayablesAgeingReport> {
+  return useQuery({
+    queryKey: queryKeys.reportingPayables(asOf),
+    queryFn: () =>
+      api.get<PayablesAgeingReport>('/reporting/payables-ageing', {
+        as_of: asOf ?? undefined,
+      }),
+    enabled,
+  })
+}
+
+export function useCashFlow(
+  filters: { from_date: string; to_date: string },
+  enabled: boolean,
+): UseQueryResult<CashFlowReport> {
+  return useQuery({
+    queryKey: queryKeys.cashFlow(filters),
+    queryFn: () => api.get<CashFlowReport>('/reporting/cash-flow', filters),
+    enabled,
+  })
+}

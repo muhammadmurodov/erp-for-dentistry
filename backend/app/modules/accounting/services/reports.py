@@ -36,6 +36,10 @@ class TrialBalanceRow:
     account_name: str
     nature: AccountNature | None
     element: AccountElement | None
+    #: True while this account's statutory classification is unconfirmed
+    #: (`OPEN_QUESTIONS.md` A1). Carried here so a statement built on this
+    #: row can say so without going back to the chart.
+    needs_confirmation: bool
     opening_debit: Decimal
     opening_credit: Decimal
     period_debit: Decimal
@@ -70,6 +74,17 @@ class TrialBalance:
             and self.total_period_debit == self.total_period_credit
             and self.total_closing_debit == self.total_closing_credit
         )
+
+
+@dataclass(frozen=True, slots=True)
+class EntryLine:
+    """One posted line, flat: which entry, which account, how much."""
+
+    entry_id: uuid.UUID
+    account_id: uuid.UUID
+    entry_date: date
+    debit: Decimal
+    credit: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +206,7 @@ class ReportService:
                 account_name=account.name,
                 nature=account.nature,
                 element=account.element,
+                needs_confirmation=account.needs_confirmation,
                 opening_debit=quantize(open_net, currency) if open_net > ZERO else ZERO,
                 opening_credit=quantize(-open_net, currency) if open_net < ZERO else ZERO,
                 period_debit=quantize(move_d, currency),
@@ -343,6 +359,48 @@ class ReportService:
         )
 
     # -------------------------------------------------------- general ledger
+
+    async def entry_lines(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        from_date: date,
+        to_date: date,
+    ) -> list[EntryLine]:
+        """Every posted line in the window, flat, with its entry.
+
+        Exists for the cash-flow statement, which has to see both sides of
+        an entry at once to say what the money was for. Returning it from
+        here keeps the ledger's tables inside the module that owns them.
+        """
+        stmt = (
+            select(
+                JournalLine.journal_entry_id,
+                JournalLine.account_id,
+                JournalLine.entry_date,
+                JournalLine.debit,
+                JournalLine.credit,
+            )
+            .where(
+                JournalLine.organization_id == organization_id,
+                JournalLine.entry_status == EntryStatus.POSTED,
+                JournalLine.entry_date >= from_date,
+                JournalLine.entry_date <= to_date,
+            )
+            .order_by(JournalLine.journal_entry_id)
+        )
+        return [
+            EntryLine(
+                entry_id=entry_id,
+                account_id=account_id,
+                entry_date=entry_date,
+                debit=Decimal(debit),
+                credit=Decimal(credit),
+            )
+            for entry_id, account_id, entry_date, debit, credit in (
+                await self._session.execute(stmt)
+            ).all()
+        ]
 
     async def general_ledger(
         self,

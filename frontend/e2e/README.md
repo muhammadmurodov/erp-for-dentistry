@@ -22,6 +22,7 @@ they can be re-run after a change instead of re-done:
 | `employees.cjs` | hiring, the rota, the monthly timesheet, ending an employment | the owner, then the cashier |
 | `purchasing.cjs` | order, deliver, invoice, pay — and what each one posts | the owner, then reception |
 | `inventory.cjs` | the shelf: a delivery arriving, a refusal to go short, a count somebody else approves | the owner, then the cashier |
+| `reports.cjs` | every statement against the ledger it came from, the drill-down, the export, and what cannot be produced yet | the owner, then the cashier |
 
 Between them they have found eighteen defects, two of them in code that had
 been passing its unit tests since Phase 2, and two that no test run could have
@@ -214,6 +215,58 @@ It creates its own material with a unique code, writes off what it bought and
 deactivates the material at the end, so it can be run twice in a row — and
 is.
 
+`reports.cjs` exists to check the claim the reporting module rests on: that a
+report cannot disagree with the ledger it came from. It does not check that
+numbers appear. It registers a patient, bills them a known amount, and then
+checks that each statement moved by exactly that much, reading the trial
+balance through the API as a second opinion. It fails on any of:
+
+- issuing the bill moving revenue by anything other than the amount billed;
+- the profit and loss not saying it is a management report, or not marking
+  the accounts whose classification is unconfirmed (A1);
+- the comparative columns not appearing when the comparison is asked for;
+- a report line that cannot be clicked, or a drill-down that shows no
+  entries;
+- a balance sheet whose assets do not equal its claims, or one that balances
+  while showing the unbalanced warning;
+- the ageing report disagreeing with the sales module's own figure for the
+  same day;
+- the cash statement not reconciling, or not saying its movements are
+  unclassified (A3);
+- the blocked statutory forms not being listed with A2, A3 and A5 — or the
+  old "not developed" message appearing again;
+- the Excel download not being a real workbook;
+- the cashier reaching any report, or being given no reason;
+- the page overflowing a phone, or showing English in Uzbek.
+
+It runs against the **demo** tenant rather than `verify-3d`, and the reason
+is itself a finding: it has to supersede the accounting policy, because a
+tenant whose policy was activated before purchasing existed has no rule for a
+supplier invoice. `verify-3d` cannot be superseded from today — repeated
+`policy.cjs` runs have pushed its newest version's effective date years into
+the future, and a new version must start after the one it replaces. That
+refusal is correct; it just makes that tenant the wrong place to do this.
+
+`policy.cjs` drives the policy editor as the owner — the only role that may
+change it — building a version, adding and editing rules, putting it into
+force, discarding a mistaken draft, and checking that an accountant sees the
+same screen with no control that changes it. A step declares the HTTP
+refusals it means to provoke, so the application correctly refusing something
+is not reported as a fault.
+
+All of them are re-runnable against the same tenant: `banking.cjs` creates its
+own bank account and seeds its own card payment, `policy.cjs` takes its
+effective date from whatever is in force and clears any draft left behind, and
+`clinic.cjs` creates its own staff, service and patients, then banks what it
+took and closes the drawer it opened — a cash account may only hold what the
+ledger says it holds, so a pass that left money in the till would be refused
+the next time it tried to open one. `small-clinic.cjs` does not assume what
+the drawer holds either: it asks for a float of nothing and reads the
+refusal, which is how it learns what the previous session counted without
+reimplementing the rule.
+
+Screenshots of every step land in `e2e/shots/`, which is not committed.
+
 ## Running it
 
 It needs the stack running, Chrome installed, and a tenant to work in. It
@@ -246,6 +299,7 @@ node frontend/e2e/plans.cjs
 node frontend/e2e/employees.cjs
 node frontend/e2e/purchasing.cjs
 node frontend/e2e/inventory.cjs
+node frontend/e2e/reports.cjs
 ```
 
 `/auth/login` is rate-limited to ten a minute, which is a control and not an

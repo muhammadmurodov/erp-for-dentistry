@@ -134,6 +134,11 @@ def require_permissions(*permissions: str) -> Callable[..., object]:
             raise
         return context
 
+    # Carried on the dependency so the route table can be inspected: a test
+    # that walks the routes can then assert a module's endpoints are all
+    # behind the permission they claim, rather than trusting each decorator
+    # was written correctly.
+    dependency.required_permissions = permissions  # type: ignore[attr-defined]
     return dependency
 
 
