@@ -101,9 +101,7 @@ class TestBookingOverHttp:
         assert "already booked" in clash.json()["message"]
         assert clash.json()["details"]["scheduled_at"] == "15:00:00"
 
-    async def test_back_to_back_is_allowed(
-        self, client: AsyncClient, login, org_a
-    ) -> None:
+    async def test_back_to_back_is_allowed(self, client: AsyncClient, login, org_a) -> None:
         headers = await login(org_a.owner.email, OWNER_PASSWORD)
         first = await a_patient(client, headers, "Oldinov")
         second = await a_patient(client, headers, "Keyinov")
@@ -203,9 +201,7 @@ class TestBookingOverHttp:
 
         # Kept, not deleted: it is still in the day's list.
         rows = (
-            await client.get(
-                f"{CLINIC}/appointments", headers=headers, params={"on": TUESDAY}
-            )
+            await client.get(f"{CLINIC}/appointments", headers=headers, params={"on": TUESDAY})
         ).json()
         assert [r["id"] for r in rows] == [booked["id"]]
         assert rows[0]["cancelled_reason"] == "The patient rang to call it off"
@@ -235,16 +231,12 @@ class TestBookingOverHttp:
         assert encounter.status_code == 201, encounter.text
 
         rows = (
-            await client.get(
-                f"{CLINIC}/appointments", headers=headers, params={"on": TUESDAY}
-            )
+            await client.get(f"{CLINIC}/appointments", headers=headers, params={"on": TUESDAY})
         ).json()
         assert rows[0]["status"] == "ARRIVED", "opening a visit means the patient is here"
         assert rows[0]["encounter_id"] == encounter.json()["id"]
 
-    async def test_a_booking_creates_no_invoice(
-        self, client: AsyncClient, login, org_a
-    ) -> None:
+    async def test_a_booking_creates_no_invoice(self, client: AsyncClient, login, org_a) -> None:
         """An appointment is a promise about time, not about money."""
         headers = await login(org_a.owner.email, OWNER_PASSWORD)
         patient = await a_patient(client, headers, "Pulsizov")
@@ -286,9 +278,7 @@ class TestBookingOverHttp:
             },
         )
         assert created.status_code == 201, created.text
-        cashier = await login(
-            "appointment-cashier@example.com", "appointment-cashier-password-1"
-        )
+        cashier = await login("appointment-cashier@example.com", "appointment-cashier-password-1")
 
         refused = await client.post(
             f"{CLINIC}/appointments",
@@ -372,9 +362,7 @@ class TestWhoMayTakeABookingOverHttp:
             },
         )
         assert created.status_code == 201, created.text
-        accountant = await login(
-            "roster-accountant@example.com", "roster-accountant-password-1"
-        )
+        accountant = await login("roster-accountant@example.com", "roster-accountant-password-1")
 
         refused = await client.get(f"{CLINIC}/dentists", headers=accountant)
         assert refused.status_code == 403, refused.text

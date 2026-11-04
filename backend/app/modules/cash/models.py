@@ -200,6 +200,10 @@ class CashMovement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     #: below meaningful for the full case while allowing several partial
     #: refunds of the same payment, each with its own record.
     payment_refund_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    #: Set when this movement pays a supplier out of the till. Held here,
+    #: on the cash side, for the same reason `payment_id` is: purchasing
+    #: need not know that cash sessions exist.
+    supplier_payment_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
     #: Only meaningful for a DEPOSIT: which transit account it posts to.
     deposit_route: Mapped[DepositRoute | None] = mapped_column(
         _enum(DepositRoute, "cash_deposit_route")
@@ -228,6 +232,12 @@ class CashMovement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             ["payment_refund.organization_id", "payment_refund.id"],
             ondelete="RESTRICT",
             name="fk_cash_movement_payment_refund",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "supplier_payment_id"],
+            ["supplier_payment.organization_id", "supplier_payment.id"],
+            ondelete="RESTRICT",
+            name="fk_cash_movement_supplier_payment",
         ),
         # One movement per payment **per direction**: a payment cannot be
         # counted into the drawer twice, and cannot be paid back out of it
@@ -260,6 +270,16 @@ class CashMovement(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "payment_refund_id",
             unique=True,
             postgresql_where=text("payment_refund_id IS NOT NULL"),
+        ),
+        # One drawer movement per supplier payment, for the same reason as
+        # the refund index above: a repeated request must not pay the same
+        # supplier out of the till twice.
+        Index(
+            "uq_cash_movement_supplier_payment",
+            "organization_id",
+            "supplier_payment_id",
+            unique=True,
+            postgresql_where=text("supplier_payment_id IS NOT NULL"),
         ),
         CheckConstraint("amount > 0", name="amount_positive"),
         CheckConstraint(

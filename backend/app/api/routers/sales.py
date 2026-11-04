@@ -613,9 +613,7 @@ async def refund_payment(
     ability to take payments — a cashier cannot refund their own takings."""
     organization_id = context.require_organization()
     billing = BillingService(db, audit)
-    existing = await billing.get_payment(
-        organization_id=organization_id, payment_id=payment_id
-    )
+    existing = await billing.get_payment(organization_id=organization_id, payment_id=payment_id)
     if existing.method is PaymentMethod.CASH:
         # The same reason cash is not *taken* here: reversing the ledger
         # without recording that the money left a till leaves the drawer
@@ -669,12 +667,8 @@ async def payment_refundability(
     organization_id = context.require_organization()
     billing = BillingService(db, audit)
     payment = await billing.get_payment(organization_id=organization_id, payment_id=payment_id)
-    figures = await billing.refundability(
-        organization_id=organization_id, payment_id=payment_id
-    )
-    refunds = await billing.list_refunds(
-        organization_id=organization_id, payment_id=payment_id
-    )
+    figures = await billing.refundability(organization_id=organization_id, payment_id=payment_id)
+    refunds = await billing.list_refunds(organization_id=organization_id, payment_id=payment_id)
     response = PaymentResponse.model_validate(payment)
     response.allocated = figures.allocated
     response.advance = figures.refundable

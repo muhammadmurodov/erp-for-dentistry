@@ -18,6 +18,7 @@ import {
 import type { SettlementStatus } from '@/lib/types'
 import { PaymentPanel } from './PaymentPanel'
 import { ClinicalPanel } from './ClinicalPanel'
+import { PlansPanel } from './PlansPanel'
 import { BillingBridge } from './BillingBridge'
 
 /**
@@ -146,6 +147,8 @@ export function PatientAccount({
       ) : null}
 
       <ClinicalPanel patientId={patientId} />
+
+      <PlansPanel patientId={patientId} />
 
       <BillingBridge
         patientId={patientId}

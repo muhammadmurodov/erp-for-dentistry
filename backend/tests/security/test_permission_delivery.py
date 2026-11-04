@@ -190,9 +190,7 @@ class TestTheMigrationChainDeliversThem:
             "nothing can see."
         )
 
-    async def test_each_system_role_holds_exactly_what_it_defines(
-        self, db: AsyncSession
-    ) -> None:
+    async def test_each_system_role_holds_exactly_what_it_defines(self, db: AsyncSession) -> None:
         """Both directions. A missing grant is a dead feature; an extra one is
         authority nobody wrote down — and the `director` role holding both
         sides of a purchasing control is a defect this project has already
@@ -222,9 +220,7 @@ class TestTheMigrationChainDeliversThem:
                 f"unexpected {sorted(granted - expected)}"
             )
 
-    async def test_the_owner_alone_may_declare_duty_separation(
-        self, db: AsyncSession
-    ) -> None:
+    async def test_the_owner_alone_may_declare_duty_separation(self, db: AsyncSession) -> None:
         """The regression that started this file: the owner was refused their
         own setting with a 403, because the permission had a route and a check
         but no row and no grant."""

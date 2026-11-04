@@ -60,17 +60,18 @@ MODULES: tuple[ModuleInfo, ...] = (
         ),
         missing_features=(
             "trends: this week against last, and revenue over time",
-            "an appointments screen to go with the count (clinic, phase 3)",
+            "expenses and bank balance (purchasing and reporting, phases 4 and 6)",
         ),
     ),
     ModuleInfo(
         key="clinic",
         phase=3,
-        # PARTIAL, and the split matters: the money side of a patient's visit
-        # is built and tested end to end, while the clinical side exists as
-        # services and routes with no screen behind them. A dentist cannot
-        # yet record a tooth from a browser, and saying so is more use than
-        # a status that implies they can.
+        # PARTIAL still, but no longer for the old reason. The clinical side
+        # now has screens: a dentist records a tooth, corrects one, and runs
+        # a course of treatment from a browser. What keeps it short of
+        # available is that the materials a treatment consumes have nowhere
+        # to come from until inventory exists (phase 4), so the clinical
+        # record cannot yet say what was used.
         status=ModuleStatus.PARTIAL,
         required_permission="clinic.patient.read",
         available_features=(
@@ -78,14 +79,16 @@ MODULES: tuple[ModuleInfo, ...] = (
             "duplicate review queue: compare two records and decide",
             "patient account: debt, advances and bills",
             "clinical record: visits, per-tooth work in FDI notation, findings",
+            "the appointment book, refusing two bookings in one chair",
             "completing treatment, and cancelling it with a reason",
+            "correcting a recorded treatment, keeping the original and the reason",
+            "courses of treatment across several visits, with their own life cycle",
             "drafting an invoice from completed treatment, once per item",
             "payment: cash, card, advances, with a derived remaining balance",
         ),
         missing_features=(
-            "appointment scheduling screen",
-            "treatment plan screen",
-            "correcting a completed item from the screen (API only)",
+            "materials used in a treatment (inventory, phase 4)",
+            "recall and reminders for a patient due back",
         ),
     ),
     ModuleInfo(
@@ -122,10 +125,10 @@ MODULES: tuple[ModuleInfo, ...] = (
             "cash payments taken into the drawer",
             "cash expenses and bank deposits via staff or collection",
             "physical count with an explained, approved discrepancy",
+            "giving back part of a payment the patient has not spent",
             "daily close posting shortage or overage",
         ),
         missing_features=(
-            "giving a cash payment back has no screen yet",
             "fiscal receipt generation and import",
             "cash transfers between registers",
             "multi-currency tills",
@@ -159,9 +162,34 @@ MODULES: tuple[ModuleInfo, ...] = (
     ModuleInfo(
         key="purchases",
         phase=4,
-        status=ModuleStatus.PLANNED,
+        # PARTIAL: the four states are built and posted correctly, but goods
+        # received before their invoice are not accrued — the workbook has no
+        # goods-received-not-invoiced account and one is not invented here.
+        # The gap is real, bounded, and recorded as an open question.
+        status=ModuleStatus.PARTIAL,
         required_permission="purchasing.order.read",
-        missing_features=("purchase orders", "goods receiving", "supplier invoices", "payables"),
+        available_features=(
+            "suppliers, with a duplicate tax number refused",
+            "purchase requests, approved by somebody other than the asker",
+            "purchase orders, which post nothing until an invoice arrives",
+            "deliveries recorded against an order, part or whole",
+            "what has arrived and not yet been invoiced",
+            "supplier invoices: draft, registered into the books, voided",
+            "one supplier's invoice number recorded once, so a delivery is "
+            "not paid for twice",
+            "partial payments, with what is left derived from live allocations",
+            "advances paid before an invoice, applied when one arrives",
+            "a cash payment that moves the till as well as the ledger",
+            "payables ageing, from the due date",
+        ),
+        missing_features=(
+            "goods received but not yet invoiced are not accrued "
+            "(no approved account — see OPEN_QUESTIONS P5)",
+            "what the materials are worth, and where they sit afterwards "
+            "(inventory, phase 4)",
+            "matching a supplier payment on a bank statement (phase 3d, "
+            "outgoing lines)",
+        ),
     ),
     ModuleInfo(
         key="inventory",
@@ -173,9 +201,28 @@ MODULES: tuple[ModuleInfo, ...] = (
     ModuleInfo(
         key="employees",
         phase=5,
-        status=ModuleStatus.PLANNED,
+        # PARTIAL, not AVAILABLE, for one reason worth naming: the clinic's
+        # legal timesheet uses twelve single-letter statutory codes whose
+        # Uzbek wording is unconfirmed (OPEN_QUESTIONS P1). The module's own
+        # five codes describe what happens in a three-person clinic and are
+        # labelled as its own; mapping them onto a form somebody signs needs
+        # the real wording, and is not guessed.
+        status=ModuleStatus.PARTIAL,
         required_permission="hr.employee.read",
-        missing_features=("employee records", "contracts", "attendance"),
+        available_features=(
+            "employee records, kept and marked rather than deleted",
+            "positions, separate from the roles that grant authority",
+            "linking an employee to their login, where they have one",
+            "one person holding several roles, read from their membership",
+            "the ordinary week, as a rota",
+            "a monthly timesheet: worked, absent, sick, leave, holiday",
+            "ending an employment, with a date and a reason, always audited",
+        ),
+        missing_features=(
+            "the statutory timesheet's twelve codes (wording unconfirmed — see OPEN_QUESTIONS P1)",
+            "contracts and the documents behind them (documents, phase 7)",
+            "what anybody is paid (payroll, phase 5)",
+        ),
     ),
     ModuleInfo(
         key="payroll",

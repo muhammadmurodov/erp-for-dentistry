@@ -109,14 +109,10 @@ class TestTheRuleItself:
 
     def test_the_owner_always_may(self) -> None:
         """ADR-018: a single-owner MChJ has nobody to delegate to."""
-        assert one_person_may_do_and_approve(
-            duties_cannot_be_separated=False, actor_is_owner=True
-        )
+        assert one_person_may_do_and_approve(duties_cannot_be_separated=False, actor_is_owner=True)
 
     def test_a_declared_small_organization_may(self) -> None:
-        assert one_person_may_do_and_approve(
-            duties_cannot_be_separated=True, actor_is_owner=False
-        )
+        assert one_person_may_do_and_approve(duties_cannot_be_separated=True, actor_is_owner=False)
 
     def test_the_declaration_does_not_relax_the_read_only_rule(self) -> None:
         """An auditor stays an auditor. Having few staff is not a reason to
@@ -303,9 +299,7 @@ class TestCombiningResponsibilitiesOnOnePerson:
                 membership=membership, role_codes=["cashier", "director"]
             )
 
-    async def test_with_it_the_owner_may_combine_them(
-        self, db: AsyncSession, audit, org_a
-    ) -> None:
+    async def test_with_it_the_owner_may_combine_them(self, db: AsyncSession, audit, org_a) -> None:
         await _declare(db, audit, org_a.id, on=True)
         identity = IdentityService(db, audit)
         _, membership = org_a.members["cashier"]
@@ -339,9 +333,7 @@ class TestOverHttp:
     response, not the service.
     """
 
-    async def test_the_declaration_is_the_owners_alone(
-        self, client, login, org_a
-    ) -> None:
+    async def test_the_declaration_is_the_owners_alone(self, client, login, org_a) -> None:
         cashier_user, _ = org_a.members["cashier"]
         headers = await login(cashier_user.email, STAFF_PASSWORD)
         refused = await client.put(
@@ -369,9 +361,7 @@ class TestOverHttp:
         fetched = await client.get(ORG, headers=headers)
         assert fetched.json()["duties_cannot_be_separated"] is True
 
-    async def test_a_declaration_without_a_reason_is_refused(
-        self, client, login, org_a
-    ) -> None:
+    async def test_a_declaration_without_a_reason_is_refused(self, client, login, org_a) -> None:
         headers = await login(org_a.owner.email, OWNER_PASSWORD)
         refused = await client.put(
             f"{ORG}/duty-separation",

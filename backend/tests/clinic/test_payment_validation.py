@@ -22,7 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import Conflict, NotFound, ValidationFailed
+from app.core.errors import Conflict, NotFound, PolicyRuleMissing, ValidationFailed
 from app.modules.accounting.services.reports import ReportService
 from app.modules.clinic.enums import SettlementStatus
 from app.modules.clinic.schemas import SettlementRequest
@@ -461,7 +461,7 @@ class TestOverpaymentIsRefused:
                 invoice_id=invoice.id,
                 reason="Uncollectable: patient emigrated",
             )
-        except (Conflict, NotFound) as exc:
+        except (Conflict, NotFound, PolicyRuleMissing) as exc:
             # Open question A7: which account takes a written-off patient
             # debt is unanswered, so the operation is registered with no
             # policy rule and fails loudly rather than posting to a guess.
@@ -1076,7 +1076,7 @@ class TestNothingIsOwedOnABillNobodyMayPay:
                 invoice_id=invoice.id,
                 reason="Uncollectable: patient emigrated",
             )
-        except (Conflict, NotFound) as exc:  # open question A7
+        except (Conflict, NotFound, PolicyRuleMissing) as exc:  # open question A7
             pytest.skip(f"write-off is not postable yet: {exc}")
 
         view = await settlement.view(organization_id=sales.id, invoice_id=invoice.id)

@@ -157,9 +157,7 @@ class TodayService:
             debt = report.total_outstanding
 
         drawer = await self._drawer(organization_id, today) if include_drawer else None
-        duplicates = (
-            await self._duplicate_reviews(organization_id) if include_duplicates else None
-        )
+        duplicates = await self._duplicate_reviews(organization_id) if include_duplicates else None
 
         return TodayView(
             business_date=today,

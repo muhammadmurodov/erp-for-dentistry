@@ -517,3 +517,66 @@ def settlement(db: AsyncSession, audit: AuditRecorder):
     from app.modules.clinic.services.settlement import SettlementService
 
     return SettlementService(db, audit)
+
+
+# --- HR fixtures ------------------------------------------------------------
+
+
+@pytest.fixture
+def employees(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.hr.services.employees import EmployeeService
+
+    return EmployeeService(db, audit)
+
+
+@pytest.fixture
+def attendance(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.hr.services.attendance import AttendanceService
+
+    return AttendanceService(db, audit)
+
+
+# --- purchasing fixtures ----------------------------------------------------
+
+
+@pytest.fixture
+def suppliers(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.purchasing.services.suppliers import SupplierService
+
+    return SupplierService(db, audit)
+
+
+@pytest.fixture
+def purchase_requests(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.purchasing.services.suppliers import PurchaseRequestService
+
+    return PurchaseRequestService(db, audit)
+
+
+@pytest.fixture
+def orders(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.purchasing.services.suppliers import PurchaseOrderService
+
+    return PurchaseOrderService(db, audit)
+
+
+@pytest.fixture
+def receiving(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.purchasing.services.receiving import ReceivingService
+
+    return ReceivingService(db, audit)
+
+
+@pytest.fixture
+def payables(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.purchasing.services.payables import PayablesService
+
+    return PayablesService(db, audit)
+
+
+@pytest.fixture
+def supplier_till(db: AsyncSession, audit: AuditRecorder):
+    """Paying a supplier out of the drawer: the cash-side composite."""
+    from app.modules.cash.services.supplier_settlement import SupplierCashSettlementService
+
+    return SupplierCashSettlementService(db, audit)

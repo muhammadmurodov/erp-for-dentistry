@@ -28,6 +28,7 @@ from app.core.errors import (
     EntryImmutable,
     NotFound,
     PeriodClosed,
+    PolicyRuleMissing,
     UnbalancedEntry,
     ValidationFailed,
 )
@@ -728,8 +729,10 @@ class PostingService:
         )
         rule = (await self._session.execute(stmt)).scalar_one_or_none()
         if rule is None:
-            raise NotFound(
-                f"No rule for operation {operation_code!r} in this policy version",
+            raise PolicyRuleMissing(
+                f"The accounting policy in force has no rule for "
+                f"{operation_code!r}, so this cannot be posted. An accountant "
+                f"must add the rule to a new policy version first.",
                 details={"operation_code": operation_code},
             )
         return rule

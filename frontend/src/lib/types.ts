@@ -808,6 +808,344 @@ export interface TreatmentItem {
   corrected_by_item_id: string | null
 }
 
+// --- purchasing -------------------------------------------------------------
+
+export type RequestStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'ORDERED'
+  | 'CANCELLED'
+
+export type OrderStatus =
+  | 'DRAFT'
+  | 'APPROVED'
+  | 'SENT'
+  | 'PARTIALLY_RECEIVED'
+  | 'RECEIVED'
+  | 'CANCELLED'
+  | 'CLOSED'
+
+export type BillKind = 'MATERIALS' | 'EXPENSE'
+export type BillStatus = 'DRAFT' | 'REGISTERED' | 'VOID'
+export type SupplierPaymentMethod = 'CASH' | 'BANK' | 'CARD'
+export type SupplierPaymentStatus = 'RECORDED' | 'REVERSED'
+
+export interface Supplier {
+  id: string
+  code: string
+  name: string
+  tax_number: string | null
+  phone: string | null
+  email: string | null
+  address: string | null
+  notes: string | null
+  is_active: boolean
+}
+
+/** What is owed to one supplier, and what has been paid ahead. */
+export interface SupplierBalance {
+  supplier_id: string
+  billed: string
+  paid: string
+  outstanding: string
+  advances_available: string
+  currency: string
+}
+
+export interface PurchaseRequest {
+  id: string
+  code: string
+  status: RequestStatus
+  requested_by_user_id: string | null
+  needed_by: string | null
+  reason: string | null
+  decided_by_user_id: string | null
+  decided_at: string | null
+  decision_note: string | null
+  self_approved: boolean
+}
+
+export interface RequestLine {
+  id: string
+  description: string
+  quantity: string
+  unit: string | null
+  estimated_unit_price: string | null
+}
+
+export interface PurchaseRequestDetail extends PurchaseRequest {
+  lines: RequestLine[]
+}
+
+export interface OrderLine {
+  id: string
+  description: string
+  quantity: string
+  unit: string | null
+  unit_price: string
+  line_total: string
+}
+
+/** One order line and how much of it is still to come. */
+export interface OutstandingLine {
+  order_line_id: string
+  description: string
+  unit: string | null
+  ordered: string
+  received: string
+  outstanding: string
+}
+
+/** A commitment to a supplier. Nothing about it posts to the ledger. */
+export interface PurchaseOrder {
+  id: string
+  code: string
+  supplier_id: string
+  supplier_name: string
+  request_id: string | null
+  status: OrderStatus
+  ordered_on: string
+  expected_on: string | null
+  currency: string
+  total: string
+  notes: string | null
+  raised_by_user_id: string | null
+  approved_by_user_id: string | null
+  approved_at: string | null
+  self_approved: boolean
+  closed_reason: string | null
+}
+
+export interface PurchaseOrderDetail extends PurchaseOrder {
+  lines: OrderLine[]
+  outstanding: OutstandingLine[]
+}
+
+export interface ReceiptLine {
+  id: string
+  receipt_id: string
+  order_line_id: string | null
+  description: string
+  quantity: string
+  unit: string | null
+  rejected_quantity: string
+  rejected_reason: string | null
+}
+
+export interface GoodsReceipt {
+  id: string
+  code: string
+  supplier_id: string
+  order_id: string | null
+  received_on: string
+  received_by_user_id: string | null
+  delivery_note: string | null
+  notes: string | null
+}
+
+export interface GoodsReceiptDetail extends GoodsReceipt {
+  lines: ReceiptLine[]
+}
+
+/** A delivery line nobody has billed for yet. */
+export interface UninvoicedLine {
+  id: string
+  receipt_id: string
+  receipt_code: string
+  received_on: string
+  description: string
+  quantity: string
+  unit: string | null
+}
+
+export interface BillLine {
+  id: string
+  description: string
+  quantity: string
+  unit: string | null
+  unit_price: string
+  line_total: string
+  receipt_line_id: string | null
+}
+
+/**
+ * A supplier's invoice.
+ *
+ * `paid` and `remaining` are derived from live allocations on every read —
+ * there is no stored balance anywhere behind them.
+ */
+export interface SupplierInvoice {
+  id: string
+  code: string
+  supplier_id: string
+  supplier_name: string
+  order_id: string | null
+  supplier_reference: string | null
+  kind: BillKind
+  status: BillStatus
+  invoice_date: string
+  due_date: string | null
+  currency: string
+  total: string
+  paid: string
+  remaining: string
+  registered_at: string | null
+  void_reason: string | null
+  notes: string | null
+}
+
+export interface SupplierInvoiceDetail extends SupplierInvoice {
+  lines: BillLine[]
+}
+
+export interface SupplierPayment {
+  id: string
+  code: string
+  supplier_id: string
+  supplier_name: string
+  amount: string
+  currency: string
+  method: SupplierPaymentMethod
+  status: SupplierPaymentStatus
+  paid_on: string
+  reference: string | null
+  notes: string | null
+  /** The part not applied to any bill — an advance held with the supplier. */
+  unapplied: string
+}
+
+export interface PayablesAgeingRow {
+  supplier_id: string
+  supplier_name: string
+  current: string
+  days_1_30: string
+  days_31_60: string
+  days_61_90: string
+  days_over_90: string
+  total: string
+}
+
+// --- employees --------------------------------------------------------------
+
+export type EmploymentStatus =
+  | 'PROSPECTIVE'
+  | 'ACTIVE'
+  | 'SUSPENDED'
+  | 'ENDED'
+
+export type AttendanceCode =
+  | 'WORKED'
+  | 'ABSENT'
+  | 'SICK'
+  | 'LEAVE'
+  | 'HOLIDAY'
+
+export interface JobPosition {
+  id: string
+  code: string
+  name: string
+  description: string | null
+  is_active: boolean
+}
+
+/**
+ * Somebody the clinic employs.
+ *
+ * `role_codes` is read from the linked login's membership on every request,
+ * never stored on the employee — one person may hold several roles, and this
+ * module must not become a second answer to what they may do.
+ */
+export interface Employee {
+  id: string
+  code: string
+  display_name: string
+  family_name: string
+  given_name: string
+  patronymic: string | null
+  phone: string | null
+  address: string | null
+  position_id: string | null
+  position_name: string | null
+  user_id: string | null
+  role_codes: string[]
+  status: EmploymentStatus
+  hired_on: string
+  ended_on: string | null
+  ended_reason: string | null
+  notes: string | null
+}
+
+/** A member of this organization with no employee record yet. */
+export interface LinkableUser {
+  id: string
+  email: string
+  full_name: string
+}
+
+/** One weekday of somebody's ordinary week. ISO weekday: 1 Monday … 7 Sunday. */
+export interface ScheduleDay {
+  weekday: number
+  hours: string
+}
+
+/** What one person's one day actually was. Hours only on a day worked. */
+export interface AttendanceDay {
+  id: string
+  employee_id: string
+  on_date: string
+  code: AttendanceCode
+  hours: string | null
+  note: string | null
+  recorded_by_user_id: string | null
+}
+
+export interface AttendanceSummary {
+  employee_id: string
+  from_date: string
+  to_date: string
+  days_present: number
+  days_absent: number
+  days_sick: number
+  days_leave: number
+  days_holiday: number
+  hours: string
+}
+
+export type PlanStatus =
+  | 'DRAFT'
+  | 'PROPOSED'
+  | 'ACCEPTED'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'ABANDONED'
+
+/**
+ * A course of treatment spanning several visits.
+ *
+ * It holds work together and carries no money: no price, no total, no
+ * invoice. Billing still happens from completed items, one at a time, which
+ * is why nothing here resembles a quotation.
+ */
+export interface TreatmentPlan {
+  id: string
+  code: string
+  patient_id: string
+  title: string
+  status: PlanStatus
+  started_on: string | null
+  completed_on: string | null
+  notes: string | null
+}
+
+export interface TreatmentPlanDetail extends TreatmentPlan {
+  dentist_user_id: string | null
+  items: TreatmentItem[]
+  /** Items still PLANNED or IN_PROGRESS; the plan cannot finish while > 0. */
+  open_item_count: number
+}
+
 export type AppointmentStatusValue =
   | 'SCHEDULED'
   | 'CONFIRMED'

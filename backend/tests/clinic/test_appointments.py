@@ -51,9 +51,7 @@ class TestBooking:
         assert appointment.status is AppointmentStatus.SCHEDULED
         assert appointment.reason == "Pain in the lower left"
 
-    async def test_a_booking_needs_no_hour(
-        self, treatments, patients, sales
-    ) -> None:
+    async def test_a_booking_needs_no_hour(self, treatments, patients, sales) -> None:
         """The clinic's register books "Tuesday" as often as "Tuesday at three"."""
         patient = await a_patient(patients, sales)
         appointment = await treatments.book(
@@ -249,9 +247,7 @@ class TestOneDentistOneChair:
 
 
 class TestMoving:
-    async def test_a_booking_can_be_moved(
-        self, treatments, patients, sales, org_a
-    ) -> None:
+    async def test_a_booking_can_be_moved(self, treatments, patients, sales, org_a) -> None:
         patient = await a_patient(patients, sales)
         appointment = await treatments.book(
             organization_id=sales.id,
@@ -325,9 +321,7 @@ class TestMoving:
         )
         assert moved.duration_minutes == 60
 
-    async def test_a_closed_booking_cannot_be_moved(
-        self, treatments, patients, sales
-    ) -> None:
+    async def test_a_closed_booking_cannot_be_moved(self, treatments, patients, sales) -> None:
         patient = await a_patient(patients, sales)
         appointment = await treatments.book(
             organization_id=sales.id, patient_id=patient.id, scheduled_on=TUESDAY
@@ -346,9 +340,7 @@ class TestMoving:
 
 
 class TestTheDay:
-    async def test_cancelling_requires_a_reason(
-        self, treatments, patients, sales
-    ) -> None:
+    async def test_cancelling_requires_a_reason(self, treatments, patients, sales) -> None:
         patient = await a_patient(patients, sales)
         appointment = await treatments.book(
             organization_id=sales.id, patient_id=patient.id, scheduled_on=TUESDAY
@@ -414,9 +406,7 @@ class TestTheDay:
         )
         await db.flush()
 
-        rows = await treatments.appointments_for_the_day(
-            organization_id=sales.id, on=TUESDAY
-        )
+        rows = await treatments.appointments_for_the_day(organization_id=sales.id, on=TUESDAY)
         assert len(rows) == 1
         row = rows[0]
         assert row.patient_name == patient.display_name
@@ -443,12 +433,8 @@ class TestTheDay:
             scheduled_at=time(9, 0),
             duration_minutes=30,
         )
-        await treatments.book(
-            organization_id=sales.id, patient_id=vague.id, scheduled_on=TUESDAY
-        )
-        rows = await treatments.appointments_for_the_day(
-            organization_id=sales.id, on=TUESDAY
-        )
+        await treatments.book(organization_id=sales.id, patient_id=vague.id, scheduled_on=TUESDAY)
+        rows = await treatments.appointments_for_the_day(organization_id=sales.id, on=TUESDAY)
         # No time means no hour claimed, so it sorts to the top of the day.
         assert [r.patient_code for r in rows] == [
             vague.code,
@@ -456,13 +442,9 @@ class TestTheDay:
             late.code,
         ]
 
-    async def test_a_patient_s_history_is_every_booking(
-        self, treatments, patients, sales
-    ) -> None:
+    async def test_a_patient_s_history_is_every_booking(self, treatments, patients, sales) -> None:
         patient = await a_patient(patients, sales)
-        await treatments.book(
-            organization_id=sales.id, patient_id=patient.id, scheduled_on=TUESDAY
-        )
+        await treatments.book(organization_id=sales.id, patient_id=patient.id, scheduled_on=TUESDAY)
         await treatments.book(
             organization_id=sales.id, patient_id=patient.id, scheduled_on=WEDNESDAY
         )
@@ -526,9 +508,7 @@ class TestWhoMayTakeABooking:
         assert dentist_id in ids
         assert org_a.owner.id in ids
 
-    async def test_it_leaves_out_everybody_else(
-        self, treatments, sales, db: AsyncSession
-    ) -> None:
+    async def test_it_leaves_out_everybody_else(self, treatments, sales, db: AsyncSession) -> None:
         """A cashier is not somebody a patient can be booked in with."""
         from app.modules.audit.service import AuditRecorder
         from app.modules.identity.service import IdentityService
@@ -639,9 +619,7 @@ class TestTwoReceptionistsAtOnce:
 
         async def attempt(patient_id, who: str) -> str:
             async with factory() as session:
-                treatments = TreatmentService(
-                    session, AuditRecorder(session, actor_label=who)
-                )
+                treatments = TreatmentService(session, AuditRecorder(session, actor_label=who))
                 try:
                     await treatments.book(
                         organization_id=org_id,
@@ -668,9 +646,7 @@ class TestTwoReceptionistsAtOnce:
             live = [r for r in rows if r.scheduled_at == time(15, 0)]
             assert len(live) == 1, "the hour was booked once, not twice"
 
-    async def test_two_bookings_at_different_hours_both_win(
-        self, engine, committed_org
-    ) -> None:
+    async def test_two_bookings_at_different_hours_both_win(self, engine, committed_org) -> None:
         """The lock serialises the day; it does not close it."""
         import asyncio
 
@@ -701,9 +677,7 @@ class TestTwoReceptionistsAtOnce:
 
         async def attempt(patient_id, at, who: str) -> str:
             async with factory() as session:
-                treatments = TreatmentService(
-                    session, AuditRecorder(session, actor_label=who)
-                )
+                treatments = TreatmentService(session, AuditRecorder(session, actor_label=who))
                 try:
                     await treatments.book(
                         organization_id=org_id,

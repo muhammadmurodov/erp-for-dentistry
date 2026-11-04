@@ -18,6 +18,9 @@ they can be re-run after a change instead of re-done:
 | `patient-to-payment.cjs` | the whole journey: register, examine, record teeth, finish, bill, pay | reception, the dentist, then the cashier |
 | `refunds.cjs` | handing money back: the refundable figure, two partial refunds, the drawer and the ledger | the cashier |
 | `appointments.cjs` | the day: booking, the clash, arrival, moving, cancelling | reception, then the cashier |
+| `plans.cjs` | a course of treatment across visits, and correcting a record | the owner, then the cashier |
+| `employees.cjs` | hiring, the rota, the monthly timesheet, ending an employment | the owner, then the cashier |
+| `purchasing.cjs` | order, deliver, invoice, pay — and what each one posts | the owner, then reception |
 
 Between them they have found eighteen defects, two of them in code that had
 been passing its unit tests since Phase 2, and two that no test run could have
@@ -122,6 +125,73 @@ It finds its own free hour rather than assuming one, and cancels the bookings
 it made when it finishes — so a second run finds its hour where it expects to
 and the clash it provokes is its own.
 
+`plans.cjs` drives a course of treatment — the prosthetic work the clinic's
+register shows running across days as a matter of course. What it is for is
+the two rules that have to reach a person rather than only a 409: a plan moves
+forward through states a clinician would recognise, and it cannot be declared
+finished while a tooth on it is still open. It also drives the correction
+screen, which until now had only an API endpoint behind it. It fails on any
+of:
+
+- a draft plan offering "Finished", or a finished plan still offering a move;
+- a plan in progress offering to finish with work outstanding, or doing so
+  without saying why not;
+- the progress count disagreeing with the work on the plan;
+- recording work not offering the open course of treatment to attach it to;
+- a correction accepted with no reason;
+- the superseded treatment disappearing, being rewritten in place, or losing
+  the pointer to its replacement;
+- the cashier being shown a finding, a treatment record or a course of
+  treatment — or losing the patient account they do need;
+- the patient page overflowing a phone, or showing English in Uzbek.
+
+`employees.cjs` drives the employees module around the boundary it is built
+on: **an employee is not a user.** The screen shows the login and the roles it
+holds and must never become a second way to create one or grant one. It hires
+somebody, sets their ordinary week, fills in the timesheet, and ends the
+employment it created. It fails on any of:
+
+- the employee screen offering to invite, create a user, or set a password;
+- an employee with no login being shown roles they cannot hold;
+- a saved rota coming back as something other than what was typed;
+- a sick day offering an hours field, or a worked day not requiring one;
+- a cell before somebody started, or after they left, being clickable;
+- the timesheet opening on a month that is not the clinic's;
+- the legend failing to say that these are not the statutory codes;
+- an employment ended without a reason, or an ended one still offering to be
+  suspended, reinstated or ended again;
+- the cashier being offered the module in the navigation, shown a staff
+  record, or given no reason when they ask for the page directly;
+- the people list overflowing a phone, or showing English in Uzbek.
+
+`purchasing.cjs` drives the four states the module keeps apart — ordered,
+received, invoiced, paid — and checks the ledger between each of them,
+because the thing most likely to be wrong is *when* something posts. It
+reads the trial balance before and after approving an order and after
+recording a delivery, and fails if either moved the payable. It fails on any
+of:
+
+- approving an order, or recording a delivery, moving account 6010;
+- a drafted invoice moving it either;
+- registering an invoice moving it by anything other than the invoice total,
+  or leaving materials account 1010 undebited;
+- the delivery still being offered for invoicing afterwards — the one
+  guarantee the whole four-record shape exists for;
+- the running total in the order form disagreeing with its lines;
+- choosing a delivery not filling the invoice line from it;
+- a cash payment offering neither a till nor a reason why not, or being
+  submittable without one;
+- reception being offered the module, shown a supplier, or given no reason;
+- the screens overflowing a phone, or showing English in Uzbek.
+
+It runs against the **demo** tenant rather than `verify-3d`, and the reason
+is itself a finding: it has to supersede the accounting policy, because a
+tenant whose policy was activated before purchasing existed has no rule for a
+supplier invoice. `verify-3d` cannot be superseded from today — repeated
+`policy.cjs` runs have pushed its newest version's effective date years into
+the future, and a new version must start after the one it replaces. That
+refusal is correct; it just makes that tenant the wrong place to do this.
+
 `policy.cjs` drives the policy editor as the owner — the only role that may
 change it — building a version, adding and editing rules, putting it into
 force, discarding a mistaken draft, and checking that an accountant sees the
@@ -170,6 +240,9 @@ node frontend/e2e/small-clinic.cjs
 node frontend/e2e/patient-to-payment.cjs
 node frontend/e2e/refunds.cjs
 node frontend/e2e/appointments.cjs
+node frontend/e2e/plans.cjs
+node frontend/e2e/employees.cjs
+node frontend/e2e/purchasing.cjs
 ```
 
 `/auth/login` is rate-limited to ten a minute, which is a control and not an

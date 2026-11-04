@@ -1,6 +1,6 @@
 # Implementation status
 
-**Last updated:** 2026-11-02 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete on the money side, with the clinical screens, the appointment book and partial refunds built and driven in a browser.**
+**Last updated:** 2026-11-03 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete — the money side, the clinical screens, the appointment book, partial refunds, courses of treatment and corrections, all driven in a browser. A full module audit is in `MODULE_AUDIT.md`; phases 4–7 are the remaining work.**
 
 The authoritative record of what works. The application serves the same
 information from `GET /api/v1/platform/modules`, and an integration test
@@ -11,11 +11,11 @@ asserts nothing beyond Phase 1 reports itself as `available`.
 Every figure below was produced by running the command shown, not estimated.
 
 ```
-backend:  611 passed, 2 skipped in 144.62s   .venv/bin/python -m pytest tests
+backend:  791 passed, 2 skipped in 279.36s   .venv/bin/python -m pytest tests
 lint:     All checks passed!       .venv/bin/ruff check app tests alembic
 schema:   No new upgrade operations detected.   alembic check
 migrate:  downgrade base -> upgrade head: clean (every test run)
-frontend: 129 passed (129)         npm test
+frontend: 187 passed (187)         npm test
           built in 1.14s           npm run build
           0 problems               npm run lint
           0 errors                 npm run typecheck
@@ -32,6 +32,14 @@ ui e2e:   Phase 1: 12 screens driven in Chrome, each inspected
           Policy:   10 policy steps driven in Chrome, 0 console errors
           Small clinic: 28 steps driven in Chrome, 0 console errors
           Refunds:  14 refund steps driven in Chrome, 0 console errors
+          Plans:    12 plan and correction steps, 0 problems
+                    (frontend/e2e/plans.cjs)
+          Employees: 14 hiring, rota and timesheet steps, 0 problems
+                    (frontend/e2e/employees.cjs)
+          Purchasing: 15 order-to-payment steps, 0 problems
+                    (frontend/e2e/purchasing.cjs)
+          Re-run after each increment: clinic, refunds, appointments,
+                    plans, employees — all 0 problems
           Appointments: 15 steps driven in Chrome, 0 console errors
                     — all kept as scripts under `frontend/e2e/`,
                       re-runnable, 0 problems reported on a repeat run
@@ -982,24 +990,286 @@ the refusal as "that account does not exist". Both are fixed in the script —
 it finds a free hour, gives the hours back when it finishes, and reads the
 directory instead of guessing.
 
+## Courses of treatment, and corrections · Complete
+
+The last two clinical workflows that had no screen. Both were already built
+and tested behind the API; what was missing was somewhere to use them.
+
+**A course of treatment** holds work that spans visits — the clinic's register
+shows prosthetic work running across days as a matter of course, an impression
+one day and a fitting later. `treatment_plan` has existed since migration
+0007 and `POST /clinic/plans` since Phase 3c, with no way to read a plan back
+afterwards. Added:
+
+- `GET /clinic/plans` (filtered by patient and state) and
+  `GET /clinic/plans/{id}`, which returns the plan with the work on it and a
+  count of what is still open.
+- `POST /clinic/plans/{id}/status`, with the transitions held as data rather
+  than a chain of `if`s, so a refusal can name what *would* have been allowed.
+  A plan moves draft → proposed → agreed → in progress → finished, or is
+  abandoned from any live state. A proposal may go back to draft, because a
+  patient asking for a change before agreeing is the ordinary case and
+  re-drafting is honest where editing a proposal in place is not.
+- **A plan cannot be finished while a tooth on it is still open.** It is
+  refused rather than silently cancelling that work: what happens to an
+  unfinished tooth is the dentist's decision, not the plan screen's.
+- The screen: a panel on the patient's record, a plan detail with its
+  progress, and a selector when recording work so a tooth can be attached to
+  a course as it is written down. Only open courses are offered — attaching
+  new work to a finished plan would reopen a decision somebody already made.
+
+**Correcting a treatment** now has a dialog. It is not an edit: the original
+stays on the record marked `CORRECTED`, pointing at its replacement, with the
+reason kept beside it. The button is offered for a completed item too — that
+is the case it exists for, the tooth written down wrong and noticed
+afterwards — and stops at the bill, because once an item has reached an
+invoice the money has moved and the invoice is corrected first.
+
+### A security control that was documented but absent
+
+`SECURITY.md` has stated since Phase 1 that `clinic.clinical.read` is marked
+sensitive "so such reads are audited". The permission was enforced, the event
+`clinic.clinical.read` was defined, and it was listed in
+`REQUIRED_AUDIT_ACTIONS` — but **nothing ever wrote it**. Reading a patient's
+treatment record left no trace of who had looked, which is exactly the
+question a privacy complaint asks.
+
+Reading an encounter list, a treatment list or a plan now writes that audit
+row and commits it, which a `GET` otherwise would not. The document now
+describes a control the system has.
+
+### How far this is verified
+
+- 25 new backend tests (`tests/clinic/test_plans.py`): the life cycle, every
+  illegal transition, the completion gate, cancelled work not holding a plan
+  open, both audit records, and tenant isolation on read and on write.
+- 14 new frontend unit tests (`src/lib/plans.test.ts`) over the transition
+  table the screen uses to decide what to offer.
+- `frontend/e2e/plans.cjs`: 12 steps in a real Chrome, 0 problems — including
+  that a draft never offers "Finished", that a plan with work outstanding
+  explains itself and disables the button, that a correction is refused
+  without a reason and keeps the original, that the **cashier is shown no
+  finding, no treatment record and no course of treatment** while keeping the
+  patient account they do need, and that the page fits a phone in Uzbek.
+
+### The registry was stale, and is now correct
+
+Commit `383b660` shipped the appointment book and partial refunds without
+updating `registry.py`. The application was under-reporting itself in three
+places: clinic claimed to be missing an appointment screen that existed, cash
+claimed refunds had no screen, and the dashboard listed an appointments screen
+as a gap. All three corrected, and the two new clinical workflows added. The
+registry is the one thing in this system allowed to decide whether a module
+says it works, so it lying in the *modest* direction is still it lying.
+
+Clinic remains `partial`, for a narrower reason than before: a treatment
+cannot yet record the materials it consumed, because inventory does not exist.
+
+## Employees · Built
+
+Phase 5's first half, and the module the four after it depend on: payroll has
+nobody to pay without it, an employee document has nothing to attach to, and
+purchasing cannot record who asked for something.
+
+**An employee is not a user** (ADR-050). `app_user` is how somebody signs in;
+`employee` is somebody the clinic employs. The link is nullable — a cleaner
+can be paid without ever signing in — and unique per organization, so one
+person cannot acquire two records and therefore two payslips. Roles stay on
+the membership and are *shown* here, never stored: one person holding several
+roles already worked, and a copy would be a second answer to what they may do.
+
+The module **never creates a login or grants a role**. Hiring somebody and
+giving them authority over the books are two decisions with two permissions,
+and an endpoint doing both would be a privilege-escalation path through a
+module nobody would think to audit.
+
+The module **stores no money**. No salary, no rate, no accrual.
+
+### What a user can actually do
+
+- Keep a staff list, searched by name or reference, filtered by state.
+- Define positions — a job title, which is not the same as a role: the
+  clinic's owner holds the `owner` role and is employed as a dentist.
+- Link somebody to their existing login; the picker offers only members who
+  have no employee record yet.
+- Set an ordinary week as a rota, and see it back.
+- Fill in a monthly timesheet as a grid, one row per person, one cell per
+  day — worked, absent, sick, leave or holiday. Recording a day again
+  replaces it and keeps the old value in the audit trail.
+- Record that somebody left, with a date and a reason. The record is kept.
+
+### Database-level guarantees, verified
+
+| Guarantee | Mechanism |
+| --- | --- |
+| An employment is `ENDED` exactly when it has a leaving date | `ck_employee_ended_has_date` |
+| Nobody leaves before they started | `ck_employee_ended_after_hired` |
+| Hours exist only on a day that was worked | `ck_attendance_day_hours_match_code` |
+| One attendance row per person per day | `uq_attendance_day_employee_date` |
+| One login belongs to one employee | `uq_employee_organization_id_user_id` |
+| An attendance row cannot name another tenant's employee | composite FK `(organization_id, employee_id)` |
+
+### Endpoints
+
+`/hr/positions` · `/hr/employees` · `/hr/employees/linkable-users` ·
+`/hr/employees/{id}` · `/hr/employees/{id}/status` · `/hr/employees/{id}/end` ·
+`/hr/employees/{id}/schedule` · `/hr/attendance` · `/hr/attendance/summary`
+
+### How far this is verified
+
+- 85 backend tests across `tests/hr/`: the employment life cycle, every
+  illegal transition, the login-link rules, attendance refusals, the month
+  grid's year boundary, and 15 API tests covering who may reach each endpoint.
+- 19 frontend unit tests over the transition table and the calendar
+  arithmetic the timesheet uses.
+- `frontend/e2e/employees.cjs`: 14 steps in a real Chrome, 0 problems —
+  including that the screen offers no way to create a login, that a sick day
+  offers no hours field, that a cell before somebody started is not
+  clickable, that an ended employment stops offering moves, and that the
+  **cashier is offered the module nowhere and told why if they ask for it
+  directly**.
+
+### A boundary the architecture guard caught
+
+`hr` imported `identity.models` directly — a layering violation
+`tests/test_module_boundaries.py` has guarded against since Phase 1, and the
+first time it has actually fired. Fixed by giving `IdentityService` the three
+things the other module genuinely needed — `list_members`, `is_member` and
+`role_codes_for` — returning a `MemberSummary` of three fields rather than the
+`User` row, so a module above identity cannot reach `password_hash` and start
+making decisions that belong there.
+
+### Why it still reports `partial`
+
+The clinic's legal timesheet uses twelve single-letter statutory codes whose
+Uzbek wording is unconfirmed (`OPEN_QUESTIONS.md` P1). The module's five codes
+are its own and the screen says so in the legend. Mapping onto a form somebody
+signs needs the real wording and is not guessed.
+
+## Purchasing · Built
+
+Phase 4's first half, and the largest single increment so far: nine tables,
+twenty endpoints, seventy backend tests.
+
+**Four records, not four flags** (ADR-052 in spirit, stated in migration
+0014). Ordering, receiving, invoicing and paying are separate tables with
+their own numbers and dates, because the questions a clinic actually asks
+span them: what did we order that has not arrived, what has arrived that we
+have not been billed for, what are we billed for that we have not paid. A
+single `purchase` row with booleans answers none of them, and is how a
+supplier who invoices twice gets paid twice.
+
+### What posts, and what deliberately does not
+
+| Event | Posts |
+| --- | --- |
+| Purchase request | nothing — somebody is asking |
+| Purchase order, approved | **nothing** — a promise to buy is not a transaction |
+| Goods receipt | **nothing** — see below |
+| Supplier invoice, drafted | nothing |
+| Supplier invoice, registered | Dr materials 1010 or expense 9420 / Cr payable 6010 |
+| Supplier payment, against a bill | Dr 6010 / Cr cash 5010 or bank 5110.01 |
+| Supplier payment, with no bill | Dr advances paid 4310 / Cr cash or bank |
+| Advance applied to a bill | Dr 6010 / Cr 4310 |
+
+Five of those seven rules come **straight off the clinic's workbook sheet**.
+The exception is `supplier_invoice_expense`, which the sheet has no row for —
+it records only the cash side of rent and utilities — and its source note
+says so and asks for confirmation.
+
+**A goods receipt posts nothing, and that is a decision.** The textbook
+accrual debits stock and credits a goods-received-not-invoiced account on the
+day goods arrive. The workbook has no such account; inventing one would be
+inventing a statutory classification, which this project does not do. The
+receipt records what arrived and the invoice does the posting. The gap is
+real — it only shows when a delivery crosses a period end — and is recorded
+as `OPEN_QUESTIONS` **P5** rather than papered over.
+
+### The guarantee the shape exists for
+
+A delivery line may be invoiced **once**. `_check_receipt_line` refuses a
+second bill against it, refuses one from a different supplier, and refuses
+the same line twice on one invoice. Beside it,
+`uq_supplier_invoice_supplier_reference` means one supplier's own invoice
+number may appear once. Between them, the commonest way a small business
+loses money to a supplier is unrepresentable.
+
+### Paying from the till
+
+The clinic pays most suppliers in cash, out of the drawer it takes patient
+money into. One act, two records that must not come apart: the posting that
+reduces the payable and the movement that reduces the cash. It lives in a
+composite service **in the cash module** — `cash/services/supplier_settlement.py`
+— because cash sits above purchasing in the layering and composes it, the
+same shape as `clinic/services/settlement.py`. The drawer is checked *before*
+the payment is created, so a closed or empty till refuses the whole act
+rather than leaving a posted payment with no movement behind it.
+
+### Database-level guarantees, verified
+
+| Guarantee | Mechanism |
+| --- | --- |
+| One supplier invoice number per supplier | `uq_supplier_invoice_supplier_reference` |
+| A bill's status cannot contradict its own dates | `ck_supplier_invoice_registered_has_time`, `ck_supplier_invoice_void_has_reason` |
+| Goods turned away say why | `ck_goods_receipt_line_rejection_has_reason` |
+| One drawer movement per supplier payment | `uq_cash_movement_supplier_payment` (partial) |
+| A line cannot belong to another tenant's order | composite FK on every child table |
+
+### How far this is verified
+
+- 70 backend tests across `tests/purchasing/`: that an order and a delivery
+  post nothing, that a part delivery leaves the right quantity outstanding,
+  that over-delivery leaves nothing outstanding rather than a negative, that
+  a delivery line cannot be billed twice, the segregation-of-duties refusals,
+  partial payment, advances, allocation reversal, ageing buckets, and paying
+  from the till including the refusal when the drawer is short.
+- 16 frontend unit tests, including money arithmetic done in integer minor
+  units — `sumAmounts(['9007199254740993.00', '1.00'])` is exact, which a
+  JavaScript number would not be.
+- `frontend/e2e/purchasing.cjs`: 15 steps in a real Chrome, 0 problems,
+  reading the **trial balance between each step** to prove that nothing
+  posted before the invoice was registered and that registering moved
+  account 6010 by exactly the invoice total.
+
+### A defect this increment found in Phase 3 code
+
+Registering an invoice under a policy that has no rule for it reported **"The
+requested record was not found"**. That is a 404 from `resolve_policy_rule`,
+and it has been the response to the deliberately-unmapped debt write-off
+since Phase 3 as well: the system's most carefully designed "fail loudly" was
+failing quietly and misleadingly. It is now `PolicyRuleMissing` — a 409 whose
+message names the operation whose rule is absent (ADR-051). This matters at
+deployment, because a clinic upgrading into a new module meets it on that
+module's first use.
+
+### Why it still reports `partial`
+
+Goods received before their invoice are not accrued (`OPEN_QUESTIONS` P5);
+what the materials are worth and where they sit afterwards is inventory's
+question (`I1`); and a supplier payment on a bank statement has nothing to
+match against until banking's outgoing lines are built.
+
 ## Next step
 
-Phase 3 is complete, including the clinic module's financial half, the
-clinical screens, the appointment book and partial refunds. In order:
+The order comes from `docs/MODULE_AUDIT.md`, which audited all thirteen
+modules against the code rather than against this document:
 
-1. **Phase 6 (part) — statutory reports**: the balance sheet and P&L, blocked
-   on `A2` and `A3`.
-2. **The treatment plan screen**, the last clinical screen with no UI, and
-   correcting a completed item, which is still API-only.
-3. **Promote the browser passes into CI**, with the stack as a service and
-   browsers cached. `banking.cjs`, `policy.cjs`, `clinic.cjs`,
-   `small-clinic.cjs`, `patient-to-payment.cjs`, `refunds.cjs` and
-   `appointments.cjs` under `frontend/e2e/` are the passes kept as scripts
-   rather than done by hand; between them they found eighteen defects, and
-   each is re-runnable against the same tenant.
-4. **Have an accountant review the workbook-derived policy.** It now has a
-   screen to review it on, every rule carries its source note, and nothing
-   else in `OPEN_QUESTIONS.md` A1/A4/A5 can be settled without that review.
+1. ~~**Employees**~~ — done, above.
+2. ~~**Purchasing**~~ — done, above.
+3. **Inventory** — depends on goods receipt, so stock arrives through the
+   right door. The quantity ledger ships first; every *valuation* posting is
+   gated behind a policy rule that must be activated, because `I1` is
+   unanswered. Quantities and low-stock alerts need no valuation at all.
+4. **Payroll** — depends on (1). Gross cost and net pay ship; every statutory
+   line is produced only from an approved, versioned rule, and a run holding
+   an unapproved one refuses to post and names it. `P2` and `P3` stay
+   unanswered and nothing is guessed.
+5. **Reports** — internal management reports, derived from the ledger.
+   Statutory filing forms stay blocked on `A2` and `A3`.
+6. **Documents** — deliberately late: it attaches to records that must exist.
+7. **Dashboard and navigation integration**, then **hardening**: component
+   tests, the browser passes promoted into CI, concurrency and idempotency
+   across the new modules.
 
 **Blocked until answered:** `OPEN_QUESTIONS.md` A5 (VAT — still decides
 whether a revenue posting splits into net plus a tax liability), A7 (which
@@ -1007,7 +1277,8 @@ account takes a written-off debt — the operation is built and permissioned but
 has no policy rule, so it fails loudly), B4 (a bank charge on a deposit or
 transfer), C1 (clinical access rules), C4 (whether the paper register's
 figures are money at all), S2 (the price list), S3 (whether the clinic bills
-before it collects).
+before it collects), I1 (inventory valuation), P2 and P3 (payroll tax and
+commission), A2 and A3 (statutory report forms and cash flow method).
 
 A5 remains the one to ask first: it shapes every revenue posting, and three
 modules now depend on the answer rather than one.

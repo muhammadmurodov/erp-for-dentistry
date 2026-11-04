@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '@/i18n'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { api } from '@/lib/api'
-import { useEncounters, useServices, useTreatments } from '@/lib/queries'
+import { useEncounters, usePlans, useServices, useTreatments } from '@/lib/queries'
 import { describeError, errorRequestId } from '@/lib/errorMessage'
 import { parseSurfaces, parseTooth } from '@/lib/fdi'
 import {
@@ -304,6 +304,7 @@ function TreatmentTable({
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState<TreatmentItem | null>(null)
+  const [correcting, setCorrecting] = useState<TreatmentItem | null>(null)
   const [reason, setReason] = useState('')
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['clinic'] })
@@ -380,6 +381,22 @@ function TreatmentTable({
                         {t.common.cancel}
                       </Button>
                     ) : null}
+                    {/*
+                      Correction is offered for a completed item too — that is
+                      the case it exists for, the tooth written down wrong and
+                      noticed afterwards. It stops at the bill: once an item
+                      has reached an invoice the money has moved, and the
+                      invoice is corrected first. The server refuses either
+                      way; the button simply does not appear.
+                    */}
+                    {mayWrite &&
+                    item.status !== 'CORRECTED' &&
+                    item.status !== 'CANCELLED' &&
+                    item.invoice_line_id === null ? (
+                      <Button size="sm" variant="ghost" onClick={() => setCorrecting(item)}>
+                        {t.clinic.correctItem}
+                      </Button>
+                    ) : null}
                   </div>
                 </Td>
               ) : null}
@@ -422,7 +439,168 @@ function TreatmentTable({
           </Field>
         </div>
       </Dialog>
+
+      {correcting ? (
+        <CorrectItemDialog item={correcting} onClose={() => setCorrecting(null)} />
+      ) : null}
     </>
+  )
+}
+
+/**
+ * Supersede a recorded treatment with what really happened.
+ *
+ * Not an edit. The original stays on the record, marked `CORRECTED` and
+ * pointing at its replacement, and the reason is kept with it — a clinical
+ * record that can be changed in place is not a clinical record. This screen
+ * is the reason the API endpoint stopped being the only way to reach that:
+ * the dentist who notices tooth 26 written where 36 was treated is not going
+ * to open a terminal.
+ */
+function CorrectItemDialog({
+  item,
+  onClose,
+}: {
+  item: TreatmentItem
+  onClose: () => void
+}) {
+  const { t } = useI18n()
+  const queryClient = useQueryClient()
+  const services = useServices(true)
+  const [serviceId, setServiceId] = useState(item.service_id)
+  const [tooth, setTooth] = useState(
+    item.tooth_number === null ? '' : String(item.tooth_number),
+  )
+  const [surfaces, setSurfaces] = useState(item.tooth_surfaces ?? '')
+  const [finding, setFinding] = useState(item.finding ?? '')
+  const [reason, setReason] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const parsedTooth = parseTooth(tooth)
+  const parsedSurfaces = parseSurfaces(surfaces)
+  const canSubmit =
+    serviceId !== '' &&
+    reason.trim().length >= 3 &&
+    !parsedTooth.error &&
+    !parsedSurfaces.error
+
+  const correct = useMutation({
+    mutationFn: () =>
+      api.post(`/clinic/treatments/${item.id}/correct`, {
+        reason: reason.trim(),
+        replacement: {
+          service_id: serviceId,
+          tooth_number: parsedTooth.tooth,
+          tooth_surfaces: parsedSurfaces.surfaces,
+          finding: finding.trim() === '' ? null : finding.trim(),
+          quantity: item.quantity,
+          // The replacement keeps the state the original had reached. A
+          // correction fixes what was recorded, it does not finish the work
+          // or un-finish it.
+          status: item.status,
+        },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['clinic'] })
+      onClose()
+    },
+    onError: (caught) => setError(describeError(caught, t)),
+  })
+
+  return (
+    <Dialog
+      open
+      size="lg"
+      onClose={onClose}
+      title={t.clinic.correctItem}
+      closeLabel={t.common.close}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={correct.isPending}>
+            {t.common.cancel}
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!canSubmit || correct.isPending}
+            loading={correct.isPending}
+            onClick={() => correct.mutate()}
+          >
+            {t.clinic.correctItem}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Alert tone="info">{t.clinic.correctItemBody}</Alert>
+
+        <Field label={t.clinic.service} htmlFor="correct-service">
+          <Select
+            id="correct-service"
+            value={serviceId}
+            onChange={(event) => setServiceId(event.target.value)}
+          >
+            {(services.data ?? []).map((service) => (
+              <option key={service.id} value={service.id}>
+                {service.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            label={t.clinic.tooth}
+            htmlFor="correct-tooth"
+            hint={t.clinic.toothHint}
+            error={
+              parsedTooth.error
+                ? parsedTooth.error === 'toothNotANumber'
+                  ? t.clinic.toothNotANumber
+                  : t.clinic.toothOutOfRange
+                : undefined
+            }
+          >
+            <Input
+              id="correct-tooth"
+              inputMode="numeric"
+              value={tooth}
+              onChange={(event) => setTooth(event.target.value)}
+            />
+          </Field>
+          <Field
+            label={t.clinic.surfaces}
+            htmlFor="correct-surfaces"
+            error={parsedSurfaces.error ? t.clinic.surfacesInvalid : undefined}
+          >
+            <Input
+              id="correct-surfaces"
+              value={surfaces}
+              onChange={(event) => setSurfaces(event.target.value)}
+            />
+          </Field>
+        </div>
+
+        <Field label={t.clinic.finding} htmlFor="correct-finding">
+          <Input
+            id="correct-finding"
+            value={finding}
+            onChange={(event) => setFinding(event.target.value)}
+          />
+        </Field>
+
+        <Field label={t.clinic.reason} required htmlFor="correct-reason">
+          <Textarea
+            id="correct-reason"
+            rows={2}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder={t.clinic.correctItemReasonPlaceholder}
+          />
+        </Field>
+
+        {error ? <Alert tone="danger">{error}</Alert> : null}
+      </div>
+    </Dialog>
   )
 }
 
@@ -522,6 +700,13 @@ function RecordItemsDialog({
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const services = useServices(true)
+  // Only courses still open are offered: attaching a new tooth to a finished
+  // or abandoned plan would reopen a decision somebody already made.
+  const plans = usePlans(encounter.patient_id, true)
+  const openPlans = (plans.data ?? []).filter(
+    (plan) => plan.status !== 'COMPLETED' && plan.status !== 'ABANDONED',
+  )
+  const [planId, setPlanId] = useState('')
   const [rows, setRows] = useState<DraftItem[]>([
     { key: 1, serviceId: '', tooth: '', surfaces: '', finding: '' },
   ])
@@ -543,6 +728,7 @@ function RecordItemsDialog({
   const record = useMutation({
     mutationFn: () =>
       api.post<unknown>(`/clinic/encounters/${encounter.id}/items`, {
+        plan_id: planId === '' ? null : planId,
         items: parsed
           .filter((p) => p.row.serviceId !== '')
           .map((p) => ({
@@ -588,6 +774,23 @@ function RecordItemsDialog({
         <p className="text-sm text-[var(--text-secondary)]">
           {t.clinic.recordTreatmentBody}
         </p>
+
+        {openPlans.length > 0 ? (
+          <Field label={t.plans.chooseForItems} htmlFor="record-plan">
+            <Select
+              id="record-plan"
+              value={planId}
+              onChange={(event) => setPlanId(event.target.value)}
+            >
+              <option value="">{t.plans.noPlan}</option>
+              {openPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.code} · {plan.title}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
 
         <div className="space-y-3">
           {rows.map((row, index) => {

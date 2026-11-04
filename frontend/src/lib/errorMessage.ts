@@ -26,6 +26,10 @@ export function describeError(error: unknown, t: Dictionary): string {
       return t.errors.rateLimited
     case 'module_not_available':
       return t.errors.moduleNotAvailable
+    case 'policy_rule_missing':
+      // The message names the operation whose rule is missing, which is the
+      // only part anybody can act on. Shown as sent.
+      return error.message || t.errors.policyRuleMissing
     case 'conflict':
       // A conflict message names the specific rule that was broken.
       return error.message || t.errors.conflict

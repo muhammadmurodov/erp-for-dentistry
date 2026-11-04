@@ -43,9 +43,7 @@ async def overpaid(sales, billing, *, bill: str = "400000", paid: str = "600000"
 class TestWhatMayBeGivenBack:
     async def test_only_the_part_no_bill_has_claimed(self, sales, billing) -> None:
         _, payment = await overpaid(sales, billing)
-        figures = await billing.refundability(
-            organization_id=sales.id, payment_id=payment.id
-        )
+        figures = await billing.refundability(organization_id=sales.id, payment_id=payment.id)
         assert figures.amount == Decimal("600000.00")
         assert figures.allocated == Decimal("400000.00")
         assert figures.refunded == Decimal("0.00")
@@ -69,9 +67,7 @@ class TestWhatMayBeGivenBack:
             received_on=PAID_ON,
             allocate_to=[(invoice.id, Decimal("300000"))],
         )
-        figures = await billing.refundability(
-            organization_id=sales.id, payment_id=payment.id
-        )
+        figures = await billing.refundability(organization_id=sales.id, payment_id=payment.id)
         assert figures.refundable == Decimal("0.00")
         assert figures.may_refund is False
 
@@ -83,9 +79,7 @@ class TestWhatMayBeGivenBack:
                 reason="Patient asked for it back",
             )
 
-    async def test_the_message_says_which_instrument_is_needed(
-        self, sales, billing
-    ) -> None:
+    async def test_the_message_says_which_instrument_is_needed(self, sales, billing) -> None:
         invoice = await issued_invoice(sales, billing, amount="300000")
         payment = await billing.record_payment(
             organization_id=sales.id,
@@ -123,9 +117,7 @@ class TestPartialRefunds:
         # settlement stands.
         assert payment.status is PaymentStatus.RECORDED
 
-    async def test_several_partial_refunds_may_follow_one_another(
-        self, sales, billing
-    ) -> None:
+    async def test_several_partial_refunds_may_follow_one_another(self, sales, billing) -> None:
         _, payment = await overpaid(sales, billing)
         for amount in ("50000", "50000", "100000"):
             await billing.refund_advance(
@@ -134,24 +126,18 @@ class TestPartialRefunds:
                 amount=Decimal(amount),
                 reason="Returned in instalments",
             )
-        figures = await billing.refundability(
-            organization_id=sales.id, payment_id=payment.id
-        )
+        figures = await billing.refundability(organization_id=sales.id, payment_id=payment.id)
         assert figures.refunded == Decimal("200000.00")
         assert figures.refundable == Decimal("0.00")
         assert figures.may_refund is False
-        refunds = await billing.list_refunds(
-            organization_id=sales.id, payment_id=payment.id
-        )
+        refunds = await billing.list_refunds(organization_id=sales.id, payment_id=payment.id)
         assert [r.amount for r in refunds] == [
             Decimal("50000.00"),
             Decimal("50000.00"),
             Decimal("100000.00"),
         ]
 
-    async def test_a_refund_beyond_what_is_refundable_is_refused(
-        self, sales, billing
-    ) -> None:
+    async def test_a_refund_beyond_what_is_refundable_is_refused(self, sales, billing) -> None:
         _, payment = await overpaid(sales, billing)
         with pytest.raises(ValidationFailed, match=r"Only 200000\.00"):
             await billing.refund_advance(
@@ -199,9 +185,7 @@ class TestPartialRefunds:
                 reason="Nothing at all",
             )
 
-    async def test_a_fully_refunded_payment_takes_no_partial_refund(
-        self, sales, billing
-    ) -> None:
+    async def test_a_fully_refunded_payment_takes_no_partial_refund(self, sales, billing) -> None:
         payment = await billing.record_payment(
             organization_id=sales.id,
             customer_id=sales.customer.id,
@@ -242,9 +226,7 @@ class TestPartialRefunds:
 
 
 class TestTheMoneyAfterwards:
-    async def test_refunded_money_is_no_longer_the_patient_s_credit(
-        self, sales, billing
-    ) -> None:
+    async def test_refunded_money_is_no_longer_the_patient_s_credit(self, sales, billing) -> None:
         _, payment = await overpaid(sales, billing)
         before = await billing.customer_balance(
             organization_id=sales.id, customer_id=sales.customer.id
@@ -264,9 +246,7 @@ class TestTheMoneyAfterwards:
         # The bill it settled is untouched: that money was never refunded.
         assert after.outstanding == Decimal("0.00")
 
-    async def test_refunded_money_cannot_then_settle_a_bill(
-        self, sales, billing
-    ) -> None:
+    async def test_refunded_money_cannot_then_settle_a_bill(self, sales, billing) -> None:
         """It has left the building. It can no more pay a bill than it can be
         refunded a second time."""
         _, payment = await overpaid(sales, billing)
@@ -287,22 +267,16 @@ class TestTheMoneyAfterwards:
 
     async def test_the_clinic_wide_advance_figure_drops(self, sales, billing) -> None:
         _, payment = await overpaid(sales, billing)
-        assert await billing.total_unapplied(organization_id=sales.id) == Decimal(
-            "200000.00"
-        )
+        assert await billing.total_unapplied(organization_id=sales.id) == Decimal("200000.00")
         await billing.refund_advance(
             organization_id=sales.id,
             payment_id=payment.id,
             amount=Decimal("120000"),
             reason="Most of it back",
         )
-        assert await billing.total_unapplied(organization_id=sales.id) == Decimal(
-            "80000.00"
-        )
+        assert await billing.total_unapplied(organization_id=sales.id) == Decimal("80000.00")
 
-    async def test_the_day_s_takings_are_net_of_what_went_back_out(
-        self, sales, billing
-    ) -> None:
+    async def test_the_day_s_takings_are_net_of_what_went_back_out(self, sales, billing) -> None:
         """So the cash tile matches the drawer, which is the one figure a
         cashier can check by counting."""
         _, payment = await overpaid(sales, billing)
@@ -330,9 +304,9 @@ class TestTheMoneyAfterwards:
             reason="Came back for it",
             refunded_on=date(2026, 10, 2),
         )
-        assert (
-            await billing.takings_on(organization_id=sales.id, on=PAID_ON)
-        ).cash == Decimal("600000.00")
+        assert (await billing.takings_on(organization_id=sales.id, on=PAID_ON)).cash == Decimal(
+            "600000.00"
+        )
 
 
 class TestTheLedger:
@@ -425,13 +399,17 @@ class TestTheAuditRecord:
         await db.flush()
 
         rows = (
-            await db.execute(
-                select(AuditLog).where(
-                    AuditLog.organization_id == sales.id,
-                    AuditLog.action == "sales.refund.approved",
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.organization_id == sales.id,
+                        AuditLog.action == "sales.refund.approved",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         event = rows[0]
         assert event.reason == "Patient overpaid in cash"
@@ -455,9 +433,7 @@ class TestTheAuditRecord:
 
 
 class TestTwoCashiersAtOnce:
-    async def test_the_same_refund_asked_for_twice_runs_out(
-        self, sales, billing
-    ) -> None:
+    async def test_the_same_refund_asked_for_twice_runs_out(self, sales, billing) -> None:
         """A double-click does not hand the money over twice.
 
         There is nothing to make the second request idempotent — two refunds
@@ -467,9 +443,7 @@ class TestTwoCashiersAtOnce:
         """
         _, payment = await overpaid(sales, billing)
         for expected in (True, False):
-            figures = await billing.refundability(
-                organization_id=sales.id, payment_id=payment.id
-            )
+            figures = await billing.refundability(organization_id=sales.id, payment_id=payment.id)
             assert figures.may_refund is expected
             if not expected:
                 break
@@ -561,8 +535,6 @@ class TestTwoCashiersAtOnce:
 
         async with factory() as check:
             billing = BillingService(check, AuditRecorder(check, actor_label="test"))
-            figures = await billing.refundability(
-                organization_id=org_id, payment_id=payment_id
-            )
+            figures = await billing.refundability(organization_id=org_id, payment_id=payment_id)
             assert figures.refunded == Decimal("200000.00"), "handed over once, not twice"
             assert figures.refundable == Decimal("0.00")

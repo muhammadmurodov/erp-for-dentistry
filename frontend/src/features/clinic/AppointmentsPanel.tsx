@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '@/i18n'
+import { shiftDay, todayInClinic } from '@/lib/clinicDate'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { api } from '@/lib/api'
 import { useAppointments, useClinicDentists, usePatients } from '@/lib/queries'
@@ -338,31 +339,7 @@ function toneFor(status: AppointmentStatusValue): 'neutral' | 'success' | 'warni
   return 'neutral'
 }
 
-/**
- * Today, in the clinic's zone rather than the browser's.
- *
- * `toISOString()` would give the UTC date, which between seven in the
- * evening and midnight in Tashkent is yesterday — exactly when the clinic is
- * still seeing patients.
- */
-function todayInClinic(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Tashkent',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date())
-  return parts
-}
 
-/** A day either side, by arithmetic on the date itself. */
-function shiftDay(day: string, by: number): string {
-  const [year = 1970, month = 1, date = 1] = day.split('-').map(Number)
-  // Built in UTC and read back in UTC, so no timezone can shift the day by
-  // one on the way through.
-  const moved = new Date(Date.UTC(year, month - 1, date + by))
-  return moved.toISOString().slice(0, 10)
-}
 
 function BookingDialog({
   open,

@@ -45,6 +45,21 @@ from app.modules.identity.service import IdentityService
 from app.modules.sales.services.billing import BillingService, InvoiceLineInput
 from app.modules.sales.services.catalogue import CatalogueService
 
+#: Which plan states may follow which. A plan moves forward through the
+#: patient's agreement and the work, or it is abandoned; the two end states
+#: are final. Kept as data rather than a chain of `if`s so the API can tell a
+#: caller what *is* allowed when it refuses.
+PLAN_TRANSITIONS: dict[PlanStatus, frozenset[PlanStatus]] = {
+    PlanStatus.DRAFT: frozenset({PlanStatus.PROPOSED, PlanStatus.ABANDONED}),
+    # Back to draft is allowed: a patient asks for a change before agreeing,
+    # and re-drafting is honest where editing a proposal in place is not.
+    PlanStatus.PROPOSED: frozenset({PlanStatus.ACCEPTED, PlanStatus.DRAFT, PlanStatus.ABANDONED}),
+    PlanStatus.ACCEPTED: frozenset({PlanStatus.IN_PROGRESS, PlanStatus.ABANDONED}),
+    PlanStatus.IN_PROGRESS: frozenset({PlanStatus.COMPLETED, PlanStatus.ABANDONED}),
+    PlanStatus.COMPLETED: frozenset(),
+    PlanStatus.ABANDONED: frozenset(),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class ItemInput:
@@ -700,6 +715,120 @@ class TreatmentService:
         )
         self._session.add(plan)
         await self._session.flush()
+
+        self._audit.record(
+            events.PLAN_CREATED,
+            organization_id=organization_id,
+            target_type="treatment_plan",
+            target_id=plan.id,
+            target_label=plan.code,
+            business_event=f"treatment_plan:{plan.id}",
+            new_values={"title": plan.title, "patient_id": str(patient_id)},
+        )
+        return plan
+
+    async def list_plans(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        patient_id: uuid.UUID | None = None,
+        statuses: list[PlanStatus] | None = None,
+    ) -> list[TreatmentPlan]:
+        stmt = select(TreatmentPlan).where(TreatmentPlan.organization_id == organization_id)
+        if patient_id is not None:
+            stmt = stmt.where(TreatmentPlan.patient_id == patient_id)
+        if statuses:
+            stmt = stmt.where(TreatmentPlan.status.in_(statuses))
+        stmt = stmt.order_by(TreatmentPlan.created_at.desc())
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def get_plan(self, *, organization_id: uuid.UUID, plan_id: uuid.UUID) -> TreatmentPlan:
+        stmt = select(TreatmentPlan).where(
+            TreatmentPlan.organization_id == organization_id,
+            TreatmentPlan.id == plan_id,
+        )
+        plan = (await self._session.execute(stmt)).scalar_one_or_none()
+        if plan is None:
+            raise NotFound("Treatment plan not found")
+        return plan
+
+    async def plan_items(
+        self, *, organization_id: uuid.UUID, plan_id: uuid.UUID
+    ) -> list[TreatmentItem]:
+        stmt = (
+            select(TreatmentItem)
+            .where(
+                TreatmentItem.organization_id == organization_id,
+                TreatmentItem.plan_id == plan_id,
+            )
+            .order_by(TreatmentItem.planned_on, TreatmentItem.created_at)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def set_plan_status(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        plan_id: uuid.UUID,
+        status: PlanStatus,
+        actor_user_id: uuid.UUID | None = None,
+    ) -> TreatmentPlan:
+        """Move a course of treatment to its next state.
+
+        The transitions are narrow on purpose. A plan is a clinical
+        commitment the patient agreed to, so it moves forward through
+        agreement and work, or it is abandoned — it never jumps from a draft
+        straight to finished, and a finished or abandoned plan is final.
+
+        Completing a plan while work on it is still open is refused rather
+        than silently cancelling that work: the dentist decides what happens
+        to an unfinished tooth, not the plan screen.
+        """
+        plan = await self.get_plan(organization_id=organization_id, plan_id=plan_id)
+        if plan.status is status:
+            return plan
+        allowed = PLAN_TRANSITIONS.get(plan.status, frozenset())
+        if status not in allowed:
+            raise Conflict(
+                f"A {plan.status.value.lower().replace('_', ' ')} plan cannot become "
+                f"{status.value.lower().replace('_', ' ')}",
+                details={
+                    "status": plan.status.value,
+                    "allowed": sorted(s.value for s in allowed),
+                },
+            )
+
+        if status is PlanStatus.COMPLETED:
+            open_items = [
+                item
+                for item in await self.plan_items(organization_id=organization_id, plan_id=plan_id)
+                if item.status in OPEN_ITEM_STATUSES
+            ]
+            if open_items:
+                raise Conflict(
+                    "This plan still has unfinished work. Complete or cancel it first.",
+                    details={"open_items": len(open_items)},
+                )
+
+        previous = plan.status
+        plan.status = status
+        if status is PlanStatus.IN_PROGRESS and plan.started_on is None:
+            plan.started_on = clinic_today()
+        if status is PlanStatus.COMPLETED:
+            plan.completed_on = clinic_today()
+        await self._session.flush()
+
+        self._audit.record(
+            events.PLAN_STATUS_CHANGED,
+            organization_id=organization_id,
+            target_type="treatment_plan",
+            target_id=plan.id,
+            target_label=plan.code,
+            business_event=f"treatment_plan:{plan.id}",
+            actor_user_id=actor_user_id,
+            old_values={"status": previous.value},
+            new_values={"status": status.value},
+        )
         return plan
 
     # --------------------------------------------------------------- billing
@@ -926,13 +1055,17 @@ class TreatmentService:
                         dentists[appointment.dentist_user_id] = ""
                 dentist_name = dentists[appointment.dentist_user_id] or None
             encounter = (
-                await self._session.execute(
-                    select(Encounter.id).where(
-                        Encounter.organization_id == organization_id,
-                        Encounter.appointment_id == appointment.id,
+                (
+                    await self._session.execute(
+                        select(Encounter.id).where(
+                            Encounter.organization_id == organization_id,
+                            Encounter.appointment_id == appointment.id,
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             views.append(
                 AppointmentView(
                     appointment=appointment,
@@ -967,9 +1100,7 @@ class TreatmentService:
         stmt = stmt.order_by(Appointment.scheduled_on, Appointment.created_at)
         return list((await self._session.execute(stmt)).scalars().all())
 
-    async def bookable_dentists(
-        self, *, organization_id: uuid.UUID
-    ) -> list[tuple[uuid.UUID, str]]:
+    async def bookable_dentists(self, *, organization_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
         """The people a booking may be given to, by id and name.
 
         Reception books the day, and so needs to know who is in the chairs —

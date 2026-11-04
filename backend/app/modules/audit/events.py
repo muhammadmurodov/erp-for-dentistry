@@ -68,6 +68,36 @@ CASH_DISCREPANCY_APPROVED: Final = "cash.discrepancy.approved"
 STATEMENT_IMPORTED: Final = "banking.statement.imported"
 RECONCILIATION_MATCHED: Final = "banking.reconciliation.matched"
 
+# --- purchasing (Phase 4) ---------------------------------------------------
+SUPPLIER_CREATED: Final = "purchasing.supplier.created"
+SUPPLIER_UPDATED: Final = "purchasing.supplier.updated"
+PURCHASE_REQUEST_SUBMITTED: Final = "purchasing.request.submitted"
+PURCHASE_REQUEST_DECIDED: Final = "purchasing.request.decided"
+PURCHASE_ORDER_CREATED: Final = "purchasing.order.created"
+#: Committing the clinic to a supplier. Nothing posts, but somebody is now
+#: expecting to be paid, so who approved it is always on record.
+PURCHASE_ORDER_APPROVED: Final = "purchasing.order.approved"
+PURCHASE_ORDER_CLOSED: Final = "purchasing.order.closed"
+GOODS_RECEIVED: Final = "purchasing.goods.received"
+SUPPLIER_INVOICE_REGISTERED: Final = "purchasing.bill.registered"
+SUPPLIER_INVOICE_VOIDED: Final = "purchasing.bill.voided"
+SUPPLIER_PAYMENT_RECORDED: Final = "purchasing.payment.recorded"
+SUPPLIER_PAYMENT_ALLOCATED: Final = "purchasing.payment.allocated"
+SUPPLIER_ALLOCATION_REVERSED: Final = "purchasing.payment.allocation_reversed"
+
+# --- employees (Phase 5) ----------------------------------------------------
+EMPLOYEE_CREATED: Final = "hr.employee.created"
+EMPLOYEE_UPDATED: Final = "hr.employee.updated"
+#: Ending somebody's employment. Financially material — it stops a payroll
+#: run paying them — and personally consequential, so it is always recorded.
+EMPLOYMENT_ENDED: Final = "hr.employee.employment_ended"
+POSITION_CREATED: Final = "hr.position.created"
+SCHEDULE_CHANGED: Final = "hr.schedule.changed"
+ATTENDANCE_RECORDED: Final = "hr.attendance.recorded"
+#: Removing a day recorded by mistake. Its own action rather than an
+#: outcome: `outcome` is constrained to success, failure and denied.
+ATTENDANCE_REMOVED: Final = "hr.attendance.removed"
+
 # --- inventory and payroll (Phase 4+) --------------------------------------
 STOCK_RECEIVED: Final = "inventory.stock.received"
 STOCK_ADJUSTED: Final = "inventory.stock.adjusted"
@@ -88,6 +118,9 @@ TREATMENT_CORRECTED: Final = "clinic.treatment.corrected"
 TREATMENT_BILLED: Final = "clinic.treatment.billed"
 APPOINTMENT_BOOKED: Final = "clinic.appointment.booked"
 APPOINTMENT_CHANGED: Final = "clinic.appointment.changed"
+PLAN_CREATED: Final = "clinic.plan.created"
+#: Moving a course of treatment between states — proposed, accepted, abandoned.
+PLAN_STATUS_CHANGED: Final = "clinic.plan.status_changed"
 
 # --- privacy ----------------------------------------------------------------
 CLINICAL_RECORD_READ: Final = "clinic.clinical.read"
@@ -114,6 +147,12 @@ REQUIRED_AUDIT_ACTIONS: Final[frozenset[str]] = frozenset(
         STOCK_ADJUSTED,
         PAYROLL_APPROVED,
         PAYROLL_POSTED,
+        EMPLOYMENT_ENDED,
+        PURCHASE_ORDER_APPROVED,
+        SUPPLIER_INVOICE_REGISTERED,
+        SUPPLIER_INVOICE_VOIDED,
+        SUPPLIER_PAYMENT_RECORDED,
+        SUPPLIER_ALLOCATION_REVERSED,
         ROLE_GRANTED,
         ROLE_REVOKED,
         CLINICAL_RECORD_READ,

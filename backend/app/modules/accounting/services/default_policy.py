@@ -44,8 +44,10 @@ class DefaultRule:
 
 
 #: Account codes referenced below, for the preflight check.
-#: 4010 receivables · 5010 cash in hand · 5110.01 bank current account
-#: 5110.03 card settlement transit · 6310 advances received · 9030 revenue
+#: 1010 materials · 4010 receivables · 4310 advances paid to suppliers
+#: 5010 cash in hand · 5110.01 bank current account
+#: 5110.03 card settlement transit · 6010 supplier payable
+#: 6310 advances received · 9030 revenue · 9420 administrative expense
 DEFAULT_RULES: tuple[DefaultRule, ...] = (
     DefaultRule(
         operation_code="invoice_issued",
@@ -255,6 +257,100 @@ DEFAULT_RULES: tuple[DefaultRule, ...] = (
         source_note=(
             "As cash_shortage. 9390 (other operating income) — an overage is "
             "income of an unexplained kind, not extra service revenue."
+        ),
+    ),
+    # --- purchasing (Phase 4) ---------------------------------------------
+    #
+    # Four of these five come straight off the workbook's own sheet. The
+    # exception is `supplier_invoice_expense`, which the workbook has no row
+    # for, and its source note says so.
+    DefaultRule(
+        operation_code="supplier_invoice_materials",
+        description="Materials invoiced by a supplier — stock and a payable",
+        description_uz="Yetkazib beruvchidan material uchun hisob-faktura",
+        description_ru="Счёт поставщика за материалы — запасы и кредиторская задолженность",
+        debit="1010",
+        credit="6010",
+        source_note=(
+            "Workbook row 'Таъминотчидан материал олинди' posts 1010/6010. "
+            "The sheet posts it on receipt; this system posts it when the "
+            "invoice is registered, because the sheet has no "
+            "goods-received-not-invoiced account and inventing one would be "
+            "inventing a statutory classification. The amount and the "
+            "liability are identical either way; only the day differs, and "
+            "then only when goods arrive before their invoice."
+        ),
+    ),
+    DefaultRule(
+        operation_code="supplier_invoice_expense",
+        description="A service invoiced by a supplier — an expense and a payable",
+        description_uz="Yetkazib beruvchi xizmati uchun hisob-faktura",
+        description_ru="Счёт поставщика за услугу — расход и кредиторская задолженность",
+        debit="9420",
+        credit="6010",
+        source_note=(
+            "Not in the workbook, which has no row for a service bought on "
+            "credit — the clinic pays rent and utilities in cash and the "
+            "sheet records only the cash side. 9420 is the account the sheet "
+            "itself uses for administrative expense at period close, so it "
+            "is the consistent choice. Needs confirmation: an accountant may "
+            "want utilities and rent split out of general administration."
+        ),
+    ),
+    DefaultRule(
+        operation_code="supplier_payment_cash",
+        description="A supplier paid out of the till",
+        description_uz="Yetkazib beruvchiga kassadan to'landi",
+        description_ru="Оплата поставщику наличными из кассы",
+        debit="6010",
+        credit="5010",
+        source_note=(
+            "The workbook pays suppliers from the bank (4310/5110.01) and "
+            "has no cash row, but 5010 is its cash account throughout and "
+            "the debit side is its own payable account."
+        ),
+    ),
+    DefaultRule(
+        operation_code="supplier_payment_bank",
+        description="A supplier paid by bank transfer",
+        description_uz="Yetkazib beruvchiga bank orqali to'landi",
+        description_ru="Оплата поставщику банковским переводом",
+        debit="6010",
+        credit="5110.01",
+        source_note=(
+            "Workbook uses 5110.01 as the main current account throughout; "
+            "6010 is its supplier payable."
+        ),
+    ),
+    DefaultRule(
+        operation_code="supplier_advance_bank",
+        description="Paid to a supplier before any invoice — an advance held",
+        description_uz="Hisob-fakturasiz yetkazib beruvchiga oldindan to'lov",
+        description_ru="Аванс поставщику до счёта",
+        debit="4310",
+        credit="5110.01",
+        source_note=("Workbook row 'Материал учун таъминотчига аванс' posts 4310/5110.01 exactly."),
+    ),
+    DefaultRule(
+        operation_code="supplier_advance_cash",
+        description="Paid to a supplier out of the till before any invoice",
+        description_uz="Hisob-fakturasiz yetkazib beruvchiga kassadan to'lov",
+        description_ru="Аванс поставщику наличными",
+        debit="4310",
+        credit="5010",
+        source_note="As supplier_advance_bank, out of the till rather than the bank.",
+    ),
+    DefaultRule(
+        operation_code="supplier_advance_applied",
+        description="A supplier advance applied to their invoice",
+        description_uz="Oldindan to'lov yetkazib beruvchi hisob-fakturasiga qo'llandi",
+        description_ru="Аванс поставщику зачтён в счёт",
+        debit="6010",
+        credit="4310",
+        source_note=(
+            "Workbook row 'Аванс ҳисобга олинди' posts 6010/4310 exactly. "
+            "Clearing an advance moves it from a receivable to a settled "
+            "payable; no cash moves and no expense is recognised again."
         ),
     ),
 )

@@ -1416,3 +1416,182 @@ status it can reach — confirmed, arrived, finished, cancelled, no-show —
 posts anything, and a test asserts the ledger is untouched by a day's worth of
 them. Attendance is not revenue; the clinic's own register shows several
 attendances a week that produce none.
+
+## ADR-048 — A course of treatment moves through states a clinician would name, and cannot be finished over unfinished work
+
+**Status:** Accepted · 2026-11-03
+
+**Context.** `treatment_plan` has existed since migration 0007 and
+`POST /clinic/plans` since Phase 3c, but there was no way to read a plan back,
+no way to move it, and no screen. The clinic's paper register shows prosthetic
+work running across days as a matter of course — an impression one day, a
+fitting a week later — so the table was right; what was missing was everything
+around it.
+
+**Decision — the transitions are data, not a chain of `if`s.**
+`PLAN_TRANSITIONS` maps each state to the states that may follow it, on the
+server and again (deliberately, narrowly) in the browser. The server is the
+authority and refuses an illegal move with a 409 that **names what would have
+been allowed**, which is only possible because the table exists to be read.
+The browser's copy decides nothing; it only stops the screen *offering* a
+button that is going to be refused. If the two ever disagree, the worst case
+is an offered action that fails — never an accepted one that should not have
+been.
+
+A plan runs draft → proposed → agreed → in progress → finished, or is
+abandoned from any live state. A proposal may go back to draft: a patient
+asking for a change before agreeing is the ordinary case, and re-drafting is
+honest where editing a proposal in place is not. Finished and abandoned are
+final — somebody who returns gets a new plan, not a resurrected one.
+
+**Decision — a plan cannot be finished while a tooth on it is still open.**
+Refused with a 409 naming how many items are outstanding, rather than
+silently cancelling them. What happens to an unfinished tooth is a clinical
+decision belonging to the dentist, not a side effect of pressing a button on a
+summary screen. The screen says so before the button is pressed, and disables
+it, rather than explaining afterwards.
+
+**Decision — a plan carries no money.** No price, no total, no quotation.
+Billing still happens from completed items through the patient's account,
+where the permission to raise a bill lives. A plan that priced itself would be
+a second, informal invoice — and the one thing this system refuses to have is
+two places where an amount is decided (ADR-026).
+
+**Consequences.** Work is attached to a plan when it is recorded, and only
+*open* plans are offered: attaching new work to a finished plan would reopen a
+decision somebody already made. A plan's progress is derived from its items
+every time it is shown, with cancelled and corrected items counted on neither
+side — counting a cancelled tooth as done would show a plan as finished when
+the work was abandoned, and counting it as outstanding would show one that can
+never end.
+
+## ADR-049 — Reading a clinical record is audited, because the document already said it was
+
+**Status:** Accepted · 2026-11-03
+
+**Context.** `SECURITY.md` has stated since Phase 1 that
+`clinic.clinical.read` is marked sensitive "so such reads are audited". The
+permission was enforced. The event `clinic.clinical.read` was defined. It was
+listed in `REQUIRED_AUDIT_ACTIONS`. **Nothing ever wrote it.** Reading a
+patient's treatment record left no trace of who had looked — which is exactly
+the question a privacy complaint asks, and the one the document promised an
+answer to.
+
+This was found by auditing the module against the code rather than against the
+documentation, which is the only way it could have been found: every test
+passed, because no test asserted the row existed.
+
+**Decision — a clinical read writes an audit row and commits it.** Listing a
+patient's visits, their treatments, or opening a course of treatment each
+record who looked, at whose record, and when. A `GET` committing is unusual
+here and deliberate: the audit row is the only thing written, and it has to
+survive the response.
+
+**Consequences.** Three endpoints now write on a read. The cost is one insert
+on screens that are opened a few dozen times a day in a clinic of three. The
+alternative — a document describing a control the system does not have — is
+worse than having neither.
+
+The general lesson is recorded with the decision: a security control stated in
+a document and never asserted by a test is a claim, not a control. Phase 7's
+hardening should include a test that every action in `REQUIRED_AUDIT_ACTIONS`
+is actually emitted by some code path, which would have caught this on the day
+it was written.
+
+## ADR-050 — An employee is not a user, and neither module answers the other's question
+
+**Status:** Accepted · 2026-11-03
+
+**Context.** Phase 5 needs employees: payroll has nobody to pay without them,
+an employee document has nothing to attach to, and purchasing cannot record
+who asked for something. The obvious shortcut is to treat the existing
+`app_user` row as the employee — in a family clinic the same human is usually
+both — and hang a salary and a job title off it.
+
+**Decision — two records, one link, and the link is nullable.** `app_user` is
+how somebody signs in. `employee` is somebody the clinic employs.
+`employee.user_id` joins them where both exist, and is unique per
+organization so one person cannot end up with two records and therefore two
+payslips. It is nullable because a cleaner can be paid without ever signing
+in, and a visiting accountant with a login may be no employee at all.
+
+**Decision — roles stay on the membership.** The brief asks that one employee
+be able to hold several roles; that already works, because roles hang off the
+membership and `membership_role` has always been many-to-many. The employee
+screen *shows* those roles, read from identity on every request, and stores
+none of them. A copy would be a second answer to "what may this person do",
+while the first answer is the one the API actually enforces against.
+
+**Decision — the employees module never creates a login or grants a role.**
+Hiring somebody and giving them authority over the books are two decisions
+with two permissions. An endpoint that did both would let `hr.employee.manage`
+mint an account with roles on it, which is a privilege-escalation path through
+a module nobody would think to look at. Linking to an **existing** member is
+allowed; creating the member is `identity.user.manage`, under Settings.
+
+**Decision — the employees module stores no money.** No salary, no rate, no
+accrual. Compensation is payroll's and reaches the ledger through the posting
+policy like everything else. A wage column here would be the start of a second
+payroll ledger.
+
+**Decision — the rota is not the timesheet.** `work_schedule_day` says what a
+normal Tuesday looks like; `attendance_day` says what happened. Payroll will
+read the second and never the first. Two tables because they answer different
+questions, and because a system that paid people from the rota would pay them
+for days they did not work.
+
+**Consequences.** Two invariants are held by the database, not merely by the
+service: an employment is `ENDED` exactly when it has a leaving date
+(`ck_employee_ended_has_date`), and hours exist only on a day that was worked
+(`ck_attendance_day_hours_match_code`). Both are the kind of thing that, let
+through once, becomes a payment nobody can explain. A third —
+`uq_attendance_day_employee_date` — makes a second row for the same day
+unrepresentable, which is the bug that pays somebody twice.
+
+Ending an employment is its own operation with a mandatory reason and an
+always-audited record, rather than one value in a general-purpose edit. It is
+financially material and personally consequential, which is the combination
+the audit trail exists for. The record is kept, never deleted: payslips and
+attendance still point at it.
+
+The module's five attendance codes are **its own**, and the screen says so.
+The statutory timesheet uses twelve single-letter codes whose Uzbek wording is
+unconfirmed (`OPEN_QUESTIONS.md` P1); mapping onto a form somebody signs needs
+the real wording and is not guessed. This is why the module reports `partial`
+rather than available.
+
+## ADR-051 — A missing policy rule is its own error, not a missing record
+
+**Status:** Accepted · 2026-11-03
+
+**Context.** Posting anything resolves a rule from the accounting policy in
+force. When the policy has no rule for the operation, `resolve_policy_rule`
+raised `NotFound` — a 404, which the frontend renders as "The requested
+record was not found."
+
+A browser pass registering a supplier invoice met exactly that message. It is
+wrong in three ways: nothing the caller asked for by id is missing; the user
+has no way to act on it; and it reads as "that invoice does not exist", which
+is alarming and false. The same message has been produced by the debt
+write-off since Phase 3, where `OPEN_QUESTIONS` A7 deliberately leaves the
+rule unmapped — so the system's most carefully designed "fail loudly" was
+failing *quietly and misleadingly* instead.
+
+**Decision — `PolicyRuleMissing`, a 409 with code `policy_rule_missing`,
+whose message names the operation.** "The accounting policy in force has no
+rule for `'supplier_invoice_materials'`, so this cannot be posted. An
+accountant must add the rule to a new policy version first." The frontend
+shows that message as sent, as it already does for a conflict.
+
+409 rather than 422: the request is well formed and would succeed once the
+policy says how to post it. 404 would be read as a missing document.
+
+**Consequences.** Every operation that posts under the policy now fails in a
+way somebody can act on — including the write-off that was built to fail.
+This matters at deployment: a clinic whose policy was activated before a
+module existed will meet this on the module's first use, and the message is
+what tells them to add the rule rather than file a bug.
+
+The general lesson is the same as ADR-049's: a control nobody has exercised
+is a claim. `A7` was designed to fail loudly and nobody had looked at what
+the failure said.

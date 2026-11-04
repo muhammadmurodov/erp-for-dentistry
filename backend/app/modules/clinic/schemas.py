@@ -476,6 +476,24 @@ class TreatmentPlanResponse(BaseModel):
     notes: str | None
 
 
+class TreatmentPlanDetail(TreatmentPlanResponse):
+    """A plan with the work recorded against it.
+
+    The items carry their own status, so the screen can show what is done and
+    what is outstanding without a second request per plan.
+    """
+
+    dentist_user_id: uuid.UUID | None
+    items: list[TreatmentItemResponse]
+    #: Items still PLANNED or IN_PROGRESS. The plan cannot be completed while
+    #: this is non-zero, and the screen says so before the button is pressed.
+    open_item_count: int
+
+
+class PlanStatusRequest(BaseModel):
+    status: PlanStatus
+
+
 class BillItemsRequest(BaseModel):
     #: Omitted bills everything completed and unbilled, which is how the
     #: clinic settles a course of treatment at the end.

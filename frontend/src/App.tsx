@@ -10,15 +10,15 @@ import { SalesPage } from '@/features/sales/SalesPage'
 import { CashPage } from '@/features/cash/CashPage'
 import { ClinicPage } from '@/features/clinic/ClinicPage'
 import { BankingPage } from '@/features/banking/BankingPage'
+import { EmployeesPage } from '@/features/employees/EmployeesPage'
+import { PurchasingPage } from '@/features/purchasing/PurchasingPage'
 import { ModulePlaceholder } from '@/features/modules/ModulePlaceholder'
 import { useI18n } from '@/i18n'
 import { Alert, EmptyState, LoadingState, PageHeader } from '@/components/ui'
 
 /** Modules whose screens are not built yet; each renders an honest placeholder. */
 const PLACEHOLDER_ROUTES = [
-  { path: 'purchases', key: 'purchases', titleKey: 'purchases' },
   { path: 'inventory', key: 'inventory', titleKey: 'inventory' },
-  { path: 'employees', key: 'employees', titleKey: 'employees' },
   { path: 'payroll', key: 'payroll', titleKey: 'payroll' },
   { path: 'reports', key: 'reports', titleKey: 'reports' },
   { path: 'documents', key: 'documents', titleKey: 'documents' },
@@ -70,6 +70,8 @@ export function App() {
         <Route path="sales/*" element={<SalesPage />} />
         <Route path="cash" element={<CashPage />} />
         <Route path="banking/*" element={<BankingPage />} />
+        <Route path="employees/*" element={<EmployeesPage />} />
+        <Route path="purchases/*" element={<PurchasingPage />} />
         <Route path="accounting/*" element={<AccountingPage />} />
         <Route path="settings/*" element={<SettingsPage />} />
         <Route path="404" element={<NotFound />} />

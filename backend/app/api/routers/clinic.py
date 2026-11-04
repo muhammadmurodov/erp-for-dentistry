@@ -25,7 +25,8 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import AuditDep, DbSession, OrgCtx, require_permissions
 from app.core.money import ZERO, quantize
-from app.modules.clinic.enums import SettlementStatus
+from app.modules.audit import events
+from app.modules.clinic.enums import OPEN_ITEM_STATUSES, PlanStatus, SettlementStatus
 from app.modules.clinic.schemas import (
     AppointmentCreateRequest,
     AppointmentRescheduleRequest,
@@ -51,6 +52,7 @@ from app.modules.clinic.schemas import (
     PatientSummary,
     PatientUpdateRequest,
     PlanCreateRequest,
+    PlanStatusRequest,
     ReasonRequest,
     RecordItemsRequest,
     ResolveReviewRequest,
@@ -60,6 +62,7 @@ from app.modules.clinic.schemas import (
     SettlementView,
     TodayResponse,
     TreatmentItemResponse,
+    TreatmentPlanDetail,
     TreatmentPlanResponse,
 )
 from app.modules.clinic.services.patients import PatientService
@@ -71,6 +74,37 @@ from app.modules.sales.schemas import InvoiceResponse
 from app.modules.sales.services.billing import BillingService
 
 router = APIRouter(prefix="/clinic", tags=["clinic"])
+
+
+async def _record_clinical_read(
+    *,
+    db: DbSession,
+    audit: AuditDep,
+    context: OrgCtx,
+    target_type: str,
+    target_id: uuid.UUID,
+    target_label: str | None = None,
+) -> None:
+    """Write the audit row for a read of somebody's clinical record.
+
+    `SECURITY.md` states that `clinic.clinical.read` is sensitive and that
+    such reads are audited. Until this existed the permission was enforced
+    but the read itself left no trace, so the document described a control
+    the system did not have. Who looked at a patient's treatment, and when,
+    is exactly the question a privacy complaint asks.
+
+    A read commits, which a GET otherwise would not: the audit row is the
+    only thing written, and it has to survive the response.
+    """
+    audit.record(
+        events.CLINICAL_RECORD_READ,
+        organization_id=context.require_organization(),
+        target_type=target_type,
+        target_id=target_id,
+        target_label=target_label,
+        actor_user_id=context.user_id,
+    )
+    await db.commit()
 
 
 def _item_input(payload) -> ItemInput:
@@ -655,6 +689,9 @@ async def list_encounters(
     rows = await TreatmentService(db, audit).list_encounters(
         organization_id=context.require_organization(), patient_id=patient_id
     )
+    await _record_clinical_read(
+        db=db, audit=audit, context=context, target_type="patient", target_id=patient_id
+    )
     return [EncounterResponse.model_validate(r) for r in rows]
 
 
@@ -699,6 +736,9 @@ async def list_treatments(
 ) -> list[TreatmentItemResponse]:
     rows = await TreatmentService(db, audit).list_items(
         organization_id=context.require_organization(), patient_id=patient_id
+    )
+    await _record_clinical_read(
+        db=db, audit=audit, context=context, target_type="patient", target_id=patient_id
     )
     return [TreatmentItemResponse.model_validate(r) for r in rows]
 
@@ -799,6 +839,85 @@ async def create_plan(
         title=payload.title,
         dentist_user_id=payload.dentist_user_id,
         notes=payload.notes,
+    )
+    await db.commit()
+    return TreatmentPlanResponse.model_validate(plan)
+
+
+@router.get(
+    "/plans",
+    response_model=list[TreatmentPlanResponse],
+    dependencies=[Depends(require_permissions("clinic.clinical.read"))],
+)
+async def list_plans(
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+    patient_id: uuid.UUID | None = Query(default=None),
+    status_filter: list[PlanStatus] | None = Query(default=None, alias="status"),
+) -> list[TreatmentPlanResponse]:
+    """Courses of treatment, newest first.
+
+    Behind `clinic.clinical.read` rather than `clinic.patient.read`: a plan
+    names the work a person is having done, which is clinical information.
+    """
+    plans = await TreatmentService(db, audit).list_plans(
+        organization_id=context.require_organization(),
+        patient_id=patient_id,
+        statuses=list(status_filter) if status_filter else None,
+    )
+    return [TreatmentPlanResponse.model_validate(p) for p in plans]
+
+
+@router.get(
+    "/plans/{plan_id}",
+    response_model=TreatmentPlanDetail,
+    dependencies=[Depends(require_permissions("clinic.clinical.read"))],
+)
+async def get_plan(
+    plan_id: uuid.UUID,
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+) -> TreatmentPlanDetail:
+    organization_id = context.require_organization()
+    service = TreatmentService(db, audit)
+    plan = await service.get_plan(organization_id=organization_id, plan_id=plan_id)
+    items = await service.plan_items(organization_id=organization_id, plan_id=plan_id)
+    await _record_clinical_read(
+        db=db,
+        audit=audit,
+        context=context,
+        target_type="treatment_plan",
+        target_id=plan.id,
+        target_label=plan.code,
+    )
+    return TreatmentPlanDetail(
+        **TreatmentPlanResponse.model_validate(plan).model_dump(),
+        dentist_user_id=plan.dentist_user_id,
+        items=[TreatmentItemResponse.model_validate(i) for i in items],
+        open_item_count=sum(1 for i in items if i.status in OPEN_ITEM_STATUSES),
+    )
+
+
+@router.post(
+    "/plans/{plan_id}/status",
+    response_model=TreatmentPlanResponse,
+    dependencies=[Depends(require_permissions("clinic.clinical.write"))],
+)
+async def set_plan_status(
+    plan_id: uuid.UUID,
+    payload: PlanStatusRequest,
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+) -> TreatmentPlanResponse:
+    """Propose a plan, record the patient's agreement, start, finish or abandon it."""
+    plan = await TreatmentService(db, audit).set_plan_status(
+        organization_id=context.require_organization(),
+        plan_id=plan_id,
+        status=payload.status,
+        actor_user_id=context.user_id,
     )
     await db.commit()
     return TreatmentPlanResponse.model_validate(plan)

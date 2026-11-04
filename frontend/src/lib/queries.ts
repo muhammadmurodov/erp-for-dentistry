@@ -7,7 +7,25 @@ import type {
   RefundabilityView,
   Encounter,
   TodayView,
+  AttendanceDay,
+  AttendanceSummary,
+  Employee,
+  GoodsReceipt,
+  PayablesAgeingRow,
+  PurchaseOrder,
+  PurchaseOrderDetail,
+  Supplier,
+  SupplierBalance,
+  SupplierInvoice,
+  SupplierInvoiceDetail,
+  SupplierPayment,
+  UninvoicedLine,
+  JobPosition,
+  LinkableUser,
+  ScheduleDay,
   TreatmentItem,
+  TreatmentPlan,
+  TreatmentPlanDetail,
   Account,
   AccountingPolicy,
   BankAccount,
@@ -106,6 +124,31 @@ export const queryKeys = {
   today: ['clinic', 'today'] as const,
   encounters: (patientId: string) => ['clinic', 'encounters', patientId] as const,
   treatments: (patientId: string) => ['clinic', 'treatments', patientId] as const,
+  suppliers: (filters: Record<string, unknown>) =>
+    ['purchasing', 'suppliers', filters] as const,
+  supplierBalance: (id: string) => ['purchasing', 'supplier', id, 'balance'] as const,
+  purchaseOrders: (filters: Record<string, unknown>) =>
+    ['purchasing', 'orders', filters] as const,
+  purchaseOrder: (id: string) => ['purchasing', 'order', id] as const,
+  goodsReceipts: (filters: Record<string, unknown>) =>
+    ['purchasing', 'receipts', filters] as const,
+  uninvoiced: (supplierId: string) =>
+    ['purchasing', 'uninvoiced', supplierId] as const,
+  bills: (filters: Record<string, unknown>) => ['purchasing', 'bills', filters] as const,
+  bill: (id: string) => ['purchasing', 'bill', id] as const,
+  supplierPayments: (filters: Record<string, unknown>) =>
+    ['purchasing', 'payments', filters] as const,
+  payablesAgeing: ['purchasing', 'payables', 'ageing'] as const,
+  employees: (filters: Record<string, unknown>) => ['hr', 'employees', filters] as const,
+  employee: (id: string) => ['hr', 'employee', id] as const,
+  positions: ['hr', 'positions'] as const,
+  linkableUsers: ['hr', 'linkable-users'] as const,
+  schedule: (employeeId: string) => ['hr', 'schedule', employeeId] as const,
+  attendance: (filters: Record<string, unknown>) => ['hr', 'attendance', filters] as const,
+  attendanceSummary: (filters: Record<string, unknown>) =>
+    ['hr', 'attendance', 'summary', filters] as const,
+  plans: (patientId: string) => ['clinic', 'plans', patientId] as const,
+  plan: (planId: string) => ['clinic', 'plan', planId] as const,
   billable: (patientId: string) => ['clinic', 'billable', patientId] as const,
   settlement: (invoiceId: string) => ['clinic', 'settlement', invoiceId] as const,
   settlementHistory: (invoiceId: string) =>
@@ -600,6 +643,37 @@ export function useTreatments(
   })
 }
 
+/** The courses of treatment on a patient's record, newest first. */
+export function usePlans(
+  patientId: string | null,
+  enabled: boolean,
+): UseQueryResult<TreatmentPlan[]> {
+  return useQuery({
+    queryKey: queryKeys.plans(patientId ?? ''),
+    queryFn: () =>
+      api.get<TreatmentPlan[]>('/clinic/plans', { patient_id: patientId ?? '' }),
+    enabled: Boolean(patientId) && enabled,
+  })
+}
+
+/**
+ * One plan with the work recorded against it.
+ *
+ * Fetched only when a plan is actually opened: reading it writes an audit row
+ * naming who looked at whose clinical record, so it is not something to do
+ * speculatively for every row in a list.
+ */
+export function usePlan(
+  planId: string | null,
+  enabled: boolean,
+): UseQueryResult<TreatmentPlanDetail> {
+  return useQuery({
+    queryKey: queryKeys.plan(planId ?? ''),
+    queryFn: () => api.get<TreatmentPlanDetail>(`/clinic/plans/${planId}`),
+    enabled: Boolean(planId) && enabled,
+  })
+}
+
 /**
  * Completed work with no invoice line: what the clinic has done and not
  * charged for. Never cached beyond the moment — billing it is what makes it
@@ -658,5 +732,209 @@ export function useSettlementHistory(
       ),
     enabled: Boolean(invoiceId),
     staleTime: 0,
+  })
+}
+
+
+// --- employees --------------------------------------------------------------
+
+export function useEmployees(
+  filters: { q?: string; status?: string },
+  enabled: boolean,
+): UseQueryResult<Employee[]> {
+  return useQuery({
+    queryKey: queryKeys.employees(filters),
+    queryFn: () => api.get<Employee[]>('/hr/employees', filters),
+    enabled,
+  })
+}
+
+export function useEmployee(
+  employeeId: string | null,
+  enabled: boolean,
+): UseQueryResult<Employee> {
+  return useQuery({
+    queryKey: queryKeys.employee(employeeId ?? ''),
+    queryFn: () => api.get<Employee>(`/hr/employees/${employeeId}`),
+    enabled: Boolean(employeeId) && enabled,
+  })
+}
+
+export function usePositions(enabled: boolean): UseQueryResult<JobPosition[]> {
+  return useQuery({
+    queryKey: queryKeys.positions,
+    queryFn: () => api.get<JobPosition[]>('/hr/positions'),
+    enabled,
+  })
+}
+
+/**
+ * Members with no employee record yet.
+ *
+ * Behind `hr.employee.manage`, so it is requested only for somebody who may
+ * actually link one — asking for it as a reader produces a 403 the screen
+ * would then have to explain away.
+ */
+export function useLinkableUsers(enabled: boolean): UseQueryResult<LinkableUser[]> {
+  return useQuery({
+    queryKey: queryKeys.linkableUsers,
+    queryFn: () => api.get<LinkableUser[]>('/hr/employees/linkable-users'),
+    enabled,
+  })
+}
+
+export function useSchedule(
+  employeeId: string | null,
+  enabled: boolean,
+): UseQueryResult<ScheduleDay[]> {
+  return useQuery({
+    queryKey: queryKeys.schedule(employeeId ?? ''),
+    queryFn: () => api.get<ScheduleDay[]>(`/hr/employees/${employeeId}/schedule`),
+    enabled: Boolean(employeeId) && enabled,
+  })
+}
+
+export function useAttendance(
+  filters: { employee_id?: string; from_date?: string; to_date?: string },
+  enabled: boolean,
+): UseQueryResult<AttendanceDay[]> {
+  return useQuery({
+    queryKey: queryKeys.attendance(filters),
+    queryFn: () => api.get<AttendanceDay[]>('/hr/attendance', filters),
+    enabled,
+  })
+}
+
+export function useAttendanceSummary(
+  filters: { employee_id: string; from_date: string; to_date: string },
+  enabled: boolean,
+): UseQueryResult<AttendanceSummary> {
+  return useQuery({
+    queryKey: queryKeys.attendanceSummary(filters),
+    queryFn: () => api.get<AttendanceSummary>('/hr/attendance/summary', filters),
+    enabled,
+  })
+}
+
+
+// --- purchasing -------------------------------------------------------------
+
+export function useSuppliers(
+  filters: { q?: string; include_inactive?: boolean },
+  enabled: boolean,
+): UseQueryResult<Supplier[]> {
+  return useQuery({
+    queryKey: queryKeys.suppliers(filters),
+    queryFn: () => api.get<Supplier[]>('/purchasing/suppliers', filters),
+    enabled,
+  })
+}
+
+export function useSupplierBalance(
+  supplierId: string | null,
+  enabled: boolean,
+): UseQueryResult<SupplierBalance> {
+  return useQuery({
+    queryKey: queryKeys.supplierBalance(supplierId ?? ''),
+    queryFn: () =>
+      api.get<SupplierBalance>(`/purchasing/suppliers/${supplierId}/balance`),
+    enabled: Boolean(supplierId) && enabled,
+  })
+}
+
+export function usePurchaseOrders(
+  filters: { supplier_id?: string; status?: string },
+  enabled: boolean,
+): UseQueryResult<PurchaseOrder[]> {
+  return useQuery({
+    queryKey: queryKeys.purchaseOrders(filters),
+    queryFn: () => api.get<PurchaseOrder[]>('/purchasing/orders', filters),
+    enabled,
+  })
+}
+
+export function usePurchaseOrder(
+  orderId: string | null,
+  enabled: boolean,
+): UseQueryResult<PurchaseOrderDetail> {
+  return useQuery({
+    queryKey: queryKeys.purchaseOrder(orderId ?? ''),
+    queryFn: () => api.get<PurchaseOrderDetail>(`/purchasing/orders/${orderId}`),
+    enabled: Boolean(orderId) && enabled,
+  })
+}
+
+export function useGoodsReceipts(
+  filters: { supplier_id?: string; order_id?: string },
+  enabled: boolean,
+): UseQueryResult<GoodsReceipt[]> {
+  return useQuery({
+    queryKey: queryKeys.goodsReceipts(filters),
+    queryFn: () => api.get<GoodsReceipt[]>('/purchasing/receipts', filters),
+    enabled,
+  })
+}
+
+/**
+ * What has arrived from a supplier and nobody has billed for.
+ *
+ * Never cached: billing a line is what makes it disappear, and a stale list
+ * would offer to invoice the same delivery twice — which is the exact
+ * failure the whole four-record shape exists to prevent.
+ */
+export function useUninvoicedLines(
+  supplierId: string | null,
+  enabled: boolean,
+): UseQueryResult<UninvoicedLine[]> {
+  return useQuery({
+    queryKey: queryKeys.uninvoiced(supplierId ?? ''),
+    queryFn: () =>
+      api.get<UninvoicedLine[]>(`/purchasing/suppliers/${supplierId}/uninvoiced`),
+    enabled: Boolean(supplierId) && enabled,
+    staleTime: 0,
+    gcTime: 0,
+  })
+}
+
+export function useBills(
+  filters: { supplier_id?: string; status?: string },
+  enabled: boolean,
+): UseQueryResult<SupplierInvoice[]> {
+  return useQuery({
+    queryKey: queryKeys.bills(filters),
+    queryFn: () => api.get<SupplierInvoice[]>('/purchasing/bills', filters),
+    enabled,
+  })
+}
+
+export function useBill(
+  invoiceId: string | null,
+  enabled: boolean,
+): UseQueryResult<SupplierInvoiceDetail> {
+  return useQuery({
+    queryKey: queryKeys.bill(invoiceId ?? ''),
+    queryFn: () => api.get<SupplierInvoiceDetail>(`/purchasing/bills/${invoiceId}`),
+    enabled: Boolean(invoiceId) && enabled,
+  })
+}
+
+export function useSupplierPayments(
+  filters: { supplier_id?: string },
+  enabled: boolean,
+): UseQueryResult<SupplierPayment[]> {
+  return useQuery({
+    queryKey: queryKeys.supplierPayments(filters),
+    queryFn: () => api.get<SupplierPayment[]>('/purchasing/payments', filters),
+    enabled,
+  })
+}
+
+export function usePayablesAgeing(
+  enabled: boolean,
+): UseQueryResult<PayablesAgeingRow[]> {
+  return useQuery({
+    queryKey: queryKeys.payablesAgeing,
+    queryFn: () => api.get<PayablesAgeingRow[]>('/purchasing/payables/ageing'),
+    enabled,
   })
 }

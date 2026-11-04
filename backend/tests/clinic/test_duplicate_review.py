@@ -136,9 +136,7 @@ class TestTheQueue:
 
 
 class TestConfirmingTheyAreDifferentPeople:
-    async def test_it_keeps_both_records_untouched(
-        self, patients, org_a, db: AsyncSession
-    ) -> None:
+    async def test_it_keeps_both_records_untouched(self, patients, org_a, db: AsyncSession) -> None:
         first, _ = await _register(patients, org_a.id)
         second, _ = await _register(patients, org_a.id)
         await db.flush()
@@ -215,9 +213,7 @@ class TestConfirmingTheyAreOnePerson:
         await db.flush()
         assert settled.status is DuplicateReviewStatus.MERGED
 
-        losing = (
-            await db.execute(select(Patient).where(Patient.id == second.id))
-        ).scalar_one()
+        losing = (await db.execute(select(Patient).where(Patient.id == second.id))).scalar_one()
         surviving = await patients.get(organization_id=org_a.id, patient_id=first.id)
         # Kept, not deleted: treatments were recorded against this row.
         assert losing.merged_into_patient_id == surviving.id
@@ -388,9 +384,7 @@ class TestSearchingForAPatient:
         self, patients, org_a, db: AsyncSession
     ) -> None:
         """Too short to discriminate: it would bury the name results."""
-        await _register(
-            patients, org_a.id, family="Rahimov", given="Sardor", phone="+998901212121"
-        )
+        await _register(patients, org_a.id, family="Rahimov", given="Sardor", phone="+998901212121")
         await db.flush()
         found = await patients.search(organization_id=org_a.id, query="12")
         assert found == [], (
@@ -425,9 +419,7 @@ class TestTheSiblingRule:
         self, patients, org_a, db: AsyncSession
     ) -> None:
         await _register(patients, org_a.id, given="Jahongir", phone="+998900000001")
-        _, candidates = await _register(
-            patients, org_a.id, given="Bahodir", phone="+998900000002"
-        )
+        _, candidates = await _register(patients, org_a.id, given="Bahodir", phone="+998900000002")
         assert candidates == [], (
             "two brothers of the same surname and birth year were reported as possible "
             "duplicates; the given name is what keeps siblings apart"
@@ -446,8 +438,6 @@ class TestTheSiblingRule:
     ) -> None:
         """A household telephone is worth asking about, and only asking."""
         await _register(patients, org_a.id, given="Jahongir", phone="+998901112233")
-        _, candidates = await _register(
-            patients, org_a.id, given="Bahodir", phone="+998901112233"
-        )
+        _, candidates = await _register(patients, org_a.id, given="Bahodir", phone="+998901112233")
         assert len(candidates) == 1
         assert "telephone" in candidates[0].reason.lower()

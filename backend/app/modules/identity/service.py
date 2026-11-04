@@ -18,6 +18,8 @@ Design notes worth knowing before changing this file:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
@@ -95,6 +97,20 @@ class AuthenticatedSession:
         self.refresh_token = refresh_token
 
 
+@dataclass(frozen=True, slots=True)
+class MemberSummary:
+    """A member of an organization, as modules above identity may see them.
+
+    Deliberately three fields. Anything more — whether they are active, when
+    they last signed in, their password state — is identity's business and
+    nobody else's.
+    """
+
+    user_id: uuid.UUID
+    email: str
+    full_name: str
+
+
 class IdentityService:
     def __init__(self, session: AsyncSession, audit: AuditRecorder) -> None:
         self._session = session
@@ -153,6 +169,52 @@ class IdentityService:
             (held | Membership.is_primary_owner.is_(True)) if include_primary_owner else held
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_members(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        exclude_user_ids: Collection[uuid.UUID] = (),
+    ) -> list[MemberSummary]:
+        """Everybody who may sign in to one organization, by name.
+
+        Returns a summary rather than the `User` row on purpose. Modules
+        above identity need a directory — the employees module offers it when
+        linking somebody to their login — and handing them the user model
+        would mean they could reach `password_hash` and `is_active` and start
+        making decisions that belong here.
+        """
+        stmt = (
+            select(User.id, User.email, User.full_name)
+            .join(Membership, Membership.user_id == User.id)
+            .where(
+                Membership.organization_id == organization_id,
+                Membership.is_active.is_(True),
+                User.is_active.is_(True),
+            )
+            .order_by(User.full_name)
+        )
+        if exclude_user_ids:
+            stmt = stmt.where(User.id.not_in(list(exclude_user_ids)))
+        rows = (await self._session.execute(stmt)).all()
+        return [MemberSummary(user_id=row[0], email=row[1], full_name=row[2]) for row in rows]
+
+    async def is_member(self, *, user_id: uuid.UUID, organization_id: uuid.UUID) -> bool:
+        """Does this login belong to this organization at all?
+
+        Asked by any module about to attach one of its records to a user.
+        Without it, an employee record could point at another tenant's user
+        and this organization's payroll would name somebody else's staff.
+        """
+        membership = await self.get_membership(user_id=user_id, organization_id=organization_id)
+        return membership is not None
+
+    async def role_codes_for(self, *, user_id: uuid.UUID, organization_id: uuid.UUID) -> list[str]:
+        """The roles a login holds here, by code. Empty if it holds none."""
+        membership = await self.get_membership(user_id=user_id, organization_id=organization_id)
+        if membership is None:
+            return []
+        return await self.role_codes(membership)
 
     async def list_memberships(self, user_id: uuid.UUID) -> list[Membership]:
         stmt = (

@@ -32,6 +32,7 @@ export type ApiErrorCode =
   | 'period_closed'
   | 'entry_immutable'
   | 'duplicate_posting_event'
+  | 'policy_rule_missing'
 
 export interface ApiErrorPayload {
   code: string

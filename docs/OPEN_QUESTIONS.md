@@ -435,3 +435,31 @@ may restore? A restore must be *tested*, not merely configured.
 **Asked as:** who holds the owner account? Who is called when something
 breaks? The owner account can grant any permission, so this is a security
 decision as much as an operational one.
+
+---
+
+### P5 — Must goods received before their invoice be accrued? · Non-blocking
+
+**Needed from:** accountant
+
+**Asked as:** when a delivery arrives on the 28th and its invoice on the 3rd
+of the next month, must the obligation appear in the books on the 28th?
+
+The textbook treatment debits stock and credits a goods-received-not-invoiced
+account on the day the goods arrive, then clears that account when the invoice
+is registered. The clinic's workbook has **no such account**: its rule posts
+materials to 1010 against payable 6010 when the invoice arrives, and nothing
+at all on delivery.
+
+This system follows the workbook. A goods receipt records what arrived and
+posts nothing; the supplier invoice does the posting. The gap only matters
+when a delivery crosses a period end, and the clinic buys materials a few
+times a month.
+
+**Meanwhile:** the receipt is recorded with its date, so the information
+needed to make the accrual exists. If the answer is yes, the rule needs a
+named account for goods received not invoiced, which cannot be chosen without
+an accountant — the sheet does not contain one.
+
+**Blocks:** nothing today. It would block a period close that must be exact
+to the day across a month boundary.

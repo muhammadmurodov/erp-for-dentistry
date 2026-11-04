@@ -235,9 +235,7 @@ async def take_cash_payment(
 @router.post(
     "/sessions/{session_id}/refunds",
     response_model=PaymentResponse,
-    dependencies=[
-        Depends(require_any_permission("sales.refund.approve", "sales.refund.request"))
-    ],
+    dependencies=[Depends(require_any_permission("sales.refund.approve", "sales.refund.request"))],
 )
 async def refund_cash_payment(
     session_id: uuid.UUID,
@@ -306,8 +304,7 @@ async def refund_cash_payment(
     # make the flag useless for the only purpose it has, which is finding the
     # cases a reviewer should look at.
     self_approved = (
-        payment.recorded_by_user_id is not None
-        and payment.recorded_by_user_id == context.user_id
+        payment.recorded_by_user_id is not None and payment.recorded_by_user_id == context.user_id
     )
 
     if payload.amount is not None:

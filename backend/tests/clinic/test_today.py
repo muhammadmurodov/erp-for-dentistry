@@ -83,7 +83,10 @@ class TestPatientsRegistered:
     ) -> None:
         await _patient(patients, sales.id, given="Today")
         await _patient(
-            patients, sales.id, family="Karimova", given="Yesterday",
+            patients,
+            sales.id,
+            family="Karimova",
+            given="Yesterday",
             registered_on=TODAY - timedelta(days=1),
         )
         await db.flush()
@@ -287,8 +290,7 @@ class TestItAgreesWithTheReportsItSummarises:
         view = await _everything(db, audit, sales.id)
         report = await ReceivablesService(db).ageing(organization_id=sales.id, as_of=TODAY)
         assert view.debt_outstanding == report.total_outstanding, (
-            "the dashboard and the ageing report must not disagree about what the "
-            "clinic is owed"
+            "the dashboard and the ageing report must not disagree about what the clinic is owed"
         )
         assert view.debt_outstanding == Decimal("650000.00")
 

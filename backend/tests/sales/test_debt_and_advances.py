@@ -16,7 +16,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import Conflict, NotFound, ValidationFailed
+from app.core.errors import Conflict, PolicyRuleMissing, ValidationFailed
 from app.modules.accounting.services.reports import ReportService
 from app.modules.sales.enums import InvoiceStatus, PaymentMethod, RevenueTaxTreatment
 from app.modules.sales.services.billing import InvoiceLineInput
@@ -582,13 +582,18 @@ class TestWriteOff:
         decision. Guessing one would put a real loss in an invented place.
         """
         invoice = await issued(sales, billing, amount="300000")
-        with pytest.raises(NotFound) as exc:
+        # `PolicyRuleMissing`, not `NotFound`: nothing the caller asked for by
+        # id is missing. What is missing is a decision an accountant has not
+        # made, and the error says which rule would settle it.
+        with pytest.raises(PolicyRuleMissing) as exc:
             await billing.write_off_debt(
                 organization_id=sales.id,
                 invoice_id=invoice.id,
                 reason="Patient untraceable",
             )
         assert "debt_written_off" in str(exc.value)
+        assert exc.value.details["operation_code"] == "debt_written_off"
+        assert exc.value.status_code == 409
 
     async def test_a_write_off_requires_a_reason(self, sales, billing) -> None:
         invoice = await issued(sales, billing, amount="300000")

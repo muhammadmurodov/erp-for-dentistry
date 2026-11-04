@@ -224,6 +224,7 @@ def one_person_may_do_and_approve(
     """
     return duties_cannot_be_separated or actor_is_owner
 
+
 SYSTEM_ROLES: tuple[RoleDefinition, ...] = (
     RoleDefinition(
         code="owner",

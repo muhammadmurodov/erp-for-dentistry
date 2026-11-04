@@ -102,3 +102,22 @@ class EntryImmutable(AccountingError):
 class DuplicatePostingEvent(AccountingError):
     status_code = 409
     code = "duplicate_posting_event"
+
+
+class PolicyRuleMissing(AccountingError):
+    """The active policy has no rule for the operation being attempted.
+
+    Deliberately **not** a `NotFound`. Nothing is missing that the caller
+    asked for by id; what is missing is a decision an accountant has not
+    made yet, and the only useful response names the operation so somebody
+    can add the rule. A 404 would be read as "that invoice does not exist",
+    which is both wrong and unactionable — and is exactly how a browser pass
+    found this: a supplier invoice refusing to register with "the requested
+    record was not found".
+
+    409 rather than 422: the request is well formed and would succeed once
+    the policy says how to post it.
+    """
+
+    status_code = 409
+    code = "policy_rule_missing"
