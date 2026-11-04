@@ -23,10 +23,13 @@ they can be re-run after a change instead of re-done:
 | `purchasing.cjs` | order, deliver, invoice, pay — and what each one posts | the owner, then reception |
 | `inventory.cjs` | the shelf: a delivery arriving, a refusal to go short, a count somebody else approves | the owner, then the cashier |
 | `reports.cjs` | every statement against the ledger it came from, the drill-down, the export, and what cannot be produced yet | the owner, then the cashier |
+| `payroll.cjs` | the month's pay: a rate nobody approved stopping it, the figures, who may approve, and what posts | the owner, the director, then the cashier |
 
-Between them they have found eighteen defects, two of them in code that had
+Between them they have found twenty-two defects, two of them in code that had
 been passing its unit tests since Phase 2, and two that no test run could have
-found because every suite rebuilds the database from `base`.
+found because every suite rebuilds the database from `base`. Four of them are
+`payroll.cjs`'s, found on its first complete run, and one of those is the worst
+the project has had.
 
 ## What they check
 
@@ -247,6 +250,79 @@ supplier invoice. `verify-3d` cannot be superseded from today — repeated
 the future, and a new version must start after the one it replaces. That
 refusal is correct; it just makes that tenant the wrong place to do this.
 
+`payroll.cjs` drives the month's pay, and it is the pass that has earned its
+keep fastest: on its first complete run it found four defects, one of them the
+most serious the project has had.
+
+**A run calculated before the rates were approved could be approved and
+posted.** The missing-rule check asked whether every required rule *is*
+approved, which it was by then — somebody had accepted the rates in between —
+and not whether these payslips were worked out under them. They were not: they
+carried no tax at all, and the clinic posted a month of wages with nothing
+withheld and nothing owed to the budget. Approval and posting now compare the
+moment the run was last calculated against the newest rule governing the
+period, and refuse with the remedy named. **And recalculating a run crashed**,
+which is why nobody would have noticed: a payslip was deleted in the same
+flush as its own lines, whose foreign key is `RESTRICT`, so the database
+refused it. The fix is a flush between the two, and the pass now checks that
+each button it presses actually sends its request — the click that sent
+nothing is what let the stale figures through.
+
+It also found that **a settled run went on displaying the reasons it had once
+been blocked for** — the list endpoint returns the snapshot stored at
+calculation, and the screen now reads the endpoint that re-asks — and that
+**the cost to the clinic fell off the right-hand edge** of the payslip table,
+the one figure a clinic most needs from a payroll being the hardest to see.
+The payslips now take the full width of the page.
+
+What it does: seeds the verified rates as drafts, opens a month, calculates it,
+and reads the refusal; approves the income tax and watches the blockage narrow
+to the social tax alone; enters a social tax rate as an accountant would,
+recalculates, and checks the payslip against figures worked out by hand
+(2,000,000 a month, two days of four: gross 1,000,000, withheld 120,000 of
+which 1,000 is INPS, net 880,000, and 120,000 of employer cost beside it). It
+then reads the trial balance before and after posting. It fails on any of:
+
+- a run blocked on an unapproved rate not saying so, or not naming the rate;
+- approval or posting being allowed while a required rate is unapproved;
+- approval or posting being allowed on figures calculated before the rates
+  were;
+- a payslip whose net is not its gross less what was withheld;
+- the social tax appearing as an employee deduction, or the screen failing to
+  say that an employer contribution never reduces anybody's pay;
+- a statutory line that does not name the rule version behind it;
+- the owner approving a run the owner calculated;
+- the expense not being gross plus the employer's contribution, or any of
+  6710, 6411, 6520.01 and 6520.02 moving by the wrong amount;
+- an entry that does not balance, a run posted twice, or paying recognising
+  any further expense;
+- an adjustment accepted with no reason, or a settled run recalculated;
+- the cashier reaching payroll or being given no reason;
+- the page overflowing a phone, or showing English in Uzbek.
+
+**It enters a social tax rate itself, and that entry is not a claim about the
+law.** The clinic's current rate is an open question (P2) and the seeder
+proposes nothing for it, which is why every real run is blocked. To drive the
+rest of the sequence the pass therefore writes one down, labelled in the
+record as entered for verification and not confirmed. The figures it checks
+are arithmetic over whatever rate was approved, not over that one.
+
+**It is the one pass that is not re-runnable against the same tenant**, and
+the reason is a rule rather than an oversight. A month holds one payroll run,
+so it walks back to the most recent month without one. But a statutory rate
+may not be approved with a start date on or before an approved rate of the
+same kind — rates are only ever added going forward — so the social tax rate
+it needs cannot be dated behind the one it approved last time. Nor can a
+policy version be dated before an existing one. It therefore checks both in
+setup and stops with an actionable message rather than failing eight steps in:
+**run it against a disposable database**, as described under *Running it*.
+
+That rule is worth knowing about for its own sake. P2 asks the accountant for
+the prior versions of each rate so an earlier period can be recomputed, and
+once the current rate is approved those earlier versions can no longer be
+entered — they would have to start before it. It is recorded as a known
+limitation in `docs/IMPLEMENTATION_STATUS.md`, not worked around here.
+
 `policy.cjs` drives the policy editor as the owner — the only role that may
 change it — building a version, adding and editing rules, putting it into
 force, discarding a mistaken draft, and checking that an accountant sees the
@@ -300,7 +376,42 @@ node frontend/e2e/employees.cjs
 node frontend/e2e/purchasing.cjs
 node frontend/e2e/inventory.cjs
 node frontend/e2e/reports.cjs
+node frontend/e2e/payroll.cjs
 ```
+
+### Against a disposable database
+
+Some of what these passes do cannot be undone by design: a posted ledger entry
+is immutable, a month holds one payroll run, and a policy version may not be
+dated before an existing one. Together those mean `payroll.cjs` can be driven
+to posting once per month per tenant — correct behaviour, and awkward for a
+pass meant to be re-runnable.
+
+So run it against a database that can be thrown away, which also leaves the
+development data alone:
+
+```bash
+# A throwaway database, migrated from nothing and seeded.
+psql -U "$USER" -d postgres -c 'DROP DATABASE IF EXISTS erp_e2e'
+psql -U "$USER" -d postgres -c 'CREATE DATABASE erp_e2e'
+cd backend
+POSTGRES_DB=erp_e2e .venv/bin/alembic upgrade head
+POSTGRES_DB=erp_e2e .venv/bin/python -m app.cli seed-demo
+
+# A stack of its own, so the ordinary one keeps running beside it.
+POSTGRES_DB=erp_e2e CORS_ORIGINS=http://localhost:5174 \
+  .venv/bin/uvicorn app.main:app --port 8001
+cd ../frontend && VITE_API_BASE_URL=http://localhost:8001 \
+  npm run dev -- --port 5174 --strictPort
+
+# The pass, pointed at it.
+E2E_WEB=http://localhost:5174 E2E_API=http://localhost:8001/api/v1 \
+  node frontend/e2e/payroll.cjs
+```
+
+Migrating from nothing is worth having for its own sake: it is the only thing
+that exercises every migration in order against a real PostgreSQL, which the
+test suite — building its schema from the models — never does.
 
 `/auth/login` is rate-limited to ten a minute, which is a control and not an
 obstacle. Running several passes back to back can spend it: if one reports

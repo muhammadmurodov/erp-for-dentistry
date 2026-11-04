@@ -2,14 +2,15 @@
 
 ## Current state
 
-**927 backend tests and 242 frontend tests: 925 passed, 2 skipped
+**992 backend tests and 277 frontend tests: 990 passed, 2 skipped
 deliberately, 0 failed** (the two skips are explained below). Verified counts,
 from `pytest tests -q` and `vitest run`, last re-run 2026-11-04.
 
 The table below lists the suites that carry a rule worth naming; it is not
 the full file list. Three modules built since it was last extended —
-`tests/hr/` (85), `tests/purchasing/` (70), `tests/inventory/` (73) and
-`tests/reporting/` (61) — are summarised at the end of it rather than line
+`tests/hr/` (85), `tests/purchasing/` (70), `tests/inventory/` (73),
+`tests/reporting/` (61) and `tests/payroll/` (65) — are summarised at the end
+of it rather than line
 by line.
 
 | Suite | Tests | Covers |
@@ -48,6 +49,7 @@ by line.
 | `tests/hr/` | 85 | The employment life cycle, every illegal transition, the login-link rules, attendance refusals, the month grid's year boundary, and who may reach each endpoint |
 | `tests/purchasing/` | 70 | That an order and a delivery post nothing, that a delivery line cannot be billed twice, the segregation refusals, partial payment, advances, ageing, and paying a supplier from the till |
 | `tests/inventory/` | 73 | That a balance is a sum and not a column, that no route can take a shelf below zero, that a consumption posts nothing, batches and expiry, low stock, and a count that only moves stock when somebody who did not count it approves (ADR-052 to ADR-055) |
+| `tests/payroll/` | 65 | That a draft rate calculates nothing and an approved one is refused without its citation; proration against the timesheet; that the social tax never reduces net pay and raising it moves nobody's; INPS taken out of the income tax rather than added to it; that the person who calculated cannot approve; that a run calculated before the rates were approved can be neither approved nor posted (ADR-062, ADR-063); the five accounts the posting moves; and that the balance sheet still balances after |
 | `tests/reporting/` | 61 | That a statement cannot disagree with the trial balance it came from; empty windows, both ends of a window, drafts excluded, a void netting to nothing, advances as a liability, a closed period reporting identically, the cash statement reconciling, every route swept for its permission, and that the downloaded workbook carries the figures (ADR-057 to ADR-061) |
 
 | Frontend suite | Tests | Covers |
@@ -62,6 +64,7 @@ by line.
 | `src/lib/employees.test.ts` | 19 | The employment transition table and the calendar arithmetic the timesheet grid uses |
 | `src/lib/purchasing.test.ts` | 16 | Order and bill states, and money summed in integer minor units |
 | `src/lib/reports.test.ts` | 26 | Period arithmetic a day out is a defect an accountant finds: quarters, year boundaries, 29 February stepping back to the 28th; exact variance in minor units; growth from nothing refusing to be a percentage; and reading the backend's capability catalogue rather than deciding for itself (ADR-061) |
+| `src/lib/payroll.test.ts` | 35 | Which of the four acts a run offers next and that posting is never offered before approval; that the three sides of a payslip are kept apart rather than netted; that the cost to the clinic is gross *plus* the employer contribution and is not net pay; month totals summed in minor units; which rule version governs a date, and that a draft governs none; and the salary in force on a date, which is not always the newest row (ADR-062) |
 | `src/lib/inventory.test.ts` | 29 | Quantity arithmetic at four decimal places — which money's two would truncate — the expiry grading, the count difference, who may approve a count, and that a stored `10.0000` is shown to a clinic as ten (ADR-056) |
 
 **Two tests skip, and say why.** `test_a_written_off_bill_takes_no_payment`
@@ -423,6 +426,22 @@ each screen inspected, across fifteen passes:
   A5; a spreadsheet downloaded and checked to be a real workbook; the cashier
   refused; and the page at phone width in Uzbek. `frontend/e2e/reports.cjs`,
   run twice in a row.
+
+* **Payroll** — the rates seeded as drafts with their sources and none
+  approved; a month opened and calculated, and the refusal naming both the
+  unapproved rate and the open question behind it; approval and posting
+  refused while a rate is unapproved, and refused again on figures calculated
+  before the rates were; the payslip checked against figures worked out by
+  hand; the social tax present as a contribution and absent from the withheld
+  column; the owner who calculated refused their own approval and the director
+  allowed it; the trial balance read before and after posting and checked at
+  9420, 6710, 6411, 6520.01 and 6520.02; the entry balancing; a second posting
+  refused; paying clearing the staff debt without touching the expense; an
+  adjustment refused with no reason; a settled run refused recalculation; the
+  cashier refused; and the page at phone width in Uzbek.
+  `frontend/e2e/payroll.cjs`, against a disposable database — it found two
+  defects on its first complete run, one of them the most serious the project
+  has had (ADR-063).
 
 Each run asserts there are no unexpected console errors or failed requests.
 The Phase 3d and 3c scripts additionally fail on a page wider than its

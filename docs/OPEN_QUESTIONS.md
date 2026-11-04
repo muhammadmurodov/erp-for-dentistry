@@ -395,6 +395,18 @@ effective-from date, and any minimum or ceiling: income tax, social tax,
 INPS, SVGPF. Prior versions with their date ranges are needed too, so a
 recalculation of an earlier period uses the rules that applied then.
 
+**What the system does meanwhile.** Payroll is built and computes: gross pay,
+proration against the timesheet, bonuses, agreed deductions, net pay, the
+approval chain and the accounting entry all work. What it will not do is
+guess a rate. Two of the three rates the audit verified are proposed as
+drafts with their citations — income tax at 12% from 2019-01-01 and the 0.1
+point of INPS inside it — and **nothing at all is proposed for the social
+tax**, so every payroll run is refused at approval and again at posting, with
+the refusal naming this question. An accountant entering the rate and
+approving it unblocks payroll; there is no default and no other way in
+(ADR-062). Answering with the prior versions and their dates would also let
+earlier periods be entered as history.
+
 ---
 
 ### P3 — How is commission-based pay calculated? · Blocking Phase 5

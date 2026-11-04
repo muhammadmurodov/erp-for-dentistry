@@ -1593,3 +1593,108 @@ export interface ReportCatalogue {
   accounts_needing_confirmation: number
   chart_unconfirmed: boolean
 }
+
+// --- Payroll ---------------------------------------------------------------
+
+export type StatutoryRuleKind =
+  | 'INCOME_TAX'
+  | 'INPS'
+  | 'EMPLOYEE_PENSION'
+  | 'SOCIAL_TAX'
+
+export type RuleMethod = 'PERCENT_OF_GROSS' | 'FIXED_AMOUNT'
+
+export type RuleStatus = 'DRAFT' | 'APPROVED' | 'SUPERSEDED'
+
+/**
+ * A statutory rate as a dated, approved, sourced record.
+ *
+ * `rate` is a string for the same reason money is: 11.9 read as a binary
+ * float is 11.899999999999999, and a tax rate is not somewhere to discover
+ * that. `legal_reference` is not decoration — the backend refuses to approve
+ * a rule without one.
+ */
+export interface PayrollRule {
+  id: string
+  kind: StatutoryRuleKind
+  method: RuleMethod
+  rate: string | null
+  fixed_amount: string | null
+  effective_from: string
+  effective_to: string | null
+  component_of: StatutoryRuleKind | null
+  legal_reference: string | null
+  source_url: string | null
+  applicability: string | null
+  notes: string | null
+  status: RuleStatus
+  approved_by_user_id: string | null
+}
+
+/** What the clinic agreed to pay one person, from one date. */
+export interface Compensation {
+  id: string
+  employee_id: string
+  kind: 'FIXED_MONTHLY'
+  amount: string
+  currency: string
+  effective_from: string
+  effective_to: string | null
+  note: string | null
+}
+
+export type PayrollRunStatus =
+  | 'DRAFT'
+  | 'CALCULATED'
+  | 'APPROVED'
+  | 'POSTED'
+  | 'PAID'
+  | 'CANCELLED'
+
+export interface PayrollRun {
+  id: string
+  code: string
+  year: number
+  month: number
+  period_start: string
+  period_end: string
+  working_days: number
+  currency: string
+  status: PayrollRunStatus
+  /**
+   * Why this run cannot be approved or posted, in words somebody can act on.
+   * Empty when nothing stands in the way.
+   */
+  blocked_reasons: string[]
+  journal_entry_id: string | null
+  notes: string | null
+}
+
+export type PayslipLineCategory =
+  | 'EARNING'
+  | 'EMPLOYEE_DEDUCTION'
+  | 'EMPLOYER_CONTRIBUTION'
+
+export interface PayslipLine {
+  id: string
+  category: PayslipLineCategory
+  code: string
+  description: string
+  amount: string
+  rate: string | null
+  statutory_rule_id: string | null
+  note: string | null
+}
+
+export interface Payslip {
+  id: string
+  employee_id: string
+  worked_days: string
+  working_days: number
+  monthly_salary: string
+  gross: string
+  employee_deductions: string
+  employer_contributions: string
+  net: string
+  lines: PayslipLine[]
+}

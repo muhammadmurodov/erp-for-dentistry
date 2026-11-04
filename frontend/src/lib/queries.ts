@@ -28,6 +28,10 @@ import type {
   PayablesAgeingRow,
   ProfitAndLoss,
   ReportCatalogue,
+  Compensation,
+  PayrollRule,
+  PayrollRun,
+  Payslip,
   PurchaseOrder,
   PurchaseOrderDetail,
   Supplier,
@@ -194,6 +198,13 @@ export const queryKeys = {
   settlement: (invoiceId: string) => ['clinic', 'settlement', invoiceId] as const,
   settlementHistory: (invoiceId: string) =>
     ['clinic', 'settlement', invoiceId, 'history'] as const,
+  payrollRules: (filters: Record<string, unknown>) =>
+    ['payroll', 'rules', filters] as const,
+  payrollRuns: (filters: Record<string, unknown>) => ['payroll', 'runs', filters] as const,
+  payrollRun: (id: string) => ['payroll', 'run', id] as const,
+  payslips: (runId: string) => ['payroll', 'run', runId, 'payslips'] as const,
+  compensation: (employeeId: string) =>
+    ['payroll', 'compensation', employeeId] as const,
 }
 
 export function useModules(): UseQueryResult<ModuleInfo[]> {
@@ -1187,5 +1198,69 @@ export function useCashFlow(
     queryKey: queryKeys.cashFlow(filters),
     queryFn: () => api.get<CashFlowReport>('/reporting/cash-flow', filters),
     enabled,
+  })
+}
+
+// --- Payroll ---------------------------------------------------------------
+
+/**
+ * Every payroll query is keyed under `['payroll', ...]`, so a mutation that
+ * changes a run or a rule invalidates the whole module in one call. The
+ * module is small and the clinic has three employees; a finer invalidation
+ * would be precision nobody benefits from, and a stale payslip beside a
+ * fresh run is exactly the kind of inconsistency this screen must not show.
+ */
+export function usePayrollRules(
+  filters: { kind?: string; status?: string },
+  enabled: boolean,
+): UseQueryResult<PayrollRule[]> {
+  return useQuery({
+    queryKey: queryKeys.payrollRules(filters),
+    queryFn: () => api.get<PayrollRule[]>('/payroll/rules', filters),
+    enabled,
+  })
+}
+
+export function usePayrollRuns(
+  filters: { year?: number },
+  enabled: boolean,
+): UseQueryResult<PayrollRun[]> {
+  return useQuery({
+    queryKey: queryKeys.payrollRuns(filters),
+    queryFn: () => api.get<PayrollRun[]>('/payroll/runs', filters),
+    enabled,
+  })
+}
+
+export function usePayrollRun(
+  runId: string | null,
+  enabled: boolean,
+): UseQueryResult<PayrollRun> {
+  return useQuery({
+    queryKey: queryKeys.payrollRun(runId ?? ''),
+    queryFn: () => api.get<PayrollRun>(`/payroll/runs/${runId}`),
+    enabled: Boolean(runId) && enabled,
+  })
+}
+
+export function usePayslips(
+  runId: string | null,
+  enabled: boolean,
+): UseQueryResult<Payslip[]> {
+  return useQuery({
+    queryKey: queryKeys.payslips(runId ?? ''),
+    queryFn: () => api.get<Payslip[]>(`/payroll/runs/${runId}/payslips`),
+    enabled: Boolean(runId) && enabled,
+  })
+}
+
+export function useCompensation(
+  employeeId: string | null,
+  enabled: boolean,
+): UseQueryResult<Compensation[]> {
+  return useQuery({
+    queryKey: queryKeys.compensation(employeeId ?? ''),
+    queryFn: () => api.get<Compensation[]>(`/payroll/employees/${employeeId}/compensation`),
+    enabled: Boolean(employeeId) && enabled,
   })
 }

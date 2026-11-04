@@ -369,9 +369,22 @@ class PayrollRunService:
         return spans
 
     async def _clear_payslips(self, *, organization_id: uuid.UUID, run_id: uuid.UUID) -> None:
-        for view in await self.payslips(organization_id=organization_id, run_id=run_id):
+        """Lines first, then the payslips, with a flush between them.
+
+        The two deletes cannot be handed to one flush. A line's foreign key
+        to its payslip is `RESTRICT` — deliberately, so no amount can lose
+        the payslip it belongs to — and the models carry no relationship
+        between them, so the unit of work has nothing to order them by and
+        is free to delete the payslip first. It does, and the database
+        refuses it. Recalculating a run was impossible until the flush below
+        was put between the two loops.
+        """
+        views = await self.payslips(organization_id=organization_id, run_id=run_id)
+        for view in views:
             for line in view.lines:
                 await self._session.delete(line)
+        await self._session.flush()
+        for view in views:
             await self._session.delete(view.payslip)
         await self._session.flush()
 
@@ -475,10 +488,16 @@ class PayrollRunService:
                 details={"control": "payroll.run.approve"},
             )
         await self._refuse_if_blocked(organization_id=organization_id, run=run)
+        await self._refuse_if_stale(organization_id=organization_id, run=run)
 
         run.status = PayrollRunStatus.APPROVED
         run.approved_at = datetime.now(UTC)
         run.approved_by_user_id = actor_user_id
+        # Nothing blocks an approved run, so the note saying otherwise goes.
+        # It is a snapshot written when the figures were worked out, and a
+        # browser pass showed a settled run still listing reasons it had
+        # long since satisfied.
+        run.blocked_reasons = None
         await self._session.flush()
         self._audit.record(
             events.PAYROLL_APPROVED,
@@ -491,6 +510,40 @@ class PayrollRunService:
             new_values={"status": run.status.value},
         )
         return run
+
+    async def _refuse_if_stale(self, *, organization_id: uuid.UUID, run: PayrollRun) -> None:
+        """The payslips must have been worked out under the rules now in force.
+
+        Checking that every required rule *is* approved is not enough, and a
+        browser pass proved it: a run calculated while nothing was approved,
+        and approved after somebody accepted the rates, carried payslips with
+        no tax on them at all. Every rule it needed existed by then, so the
+        missing-rule check passed and the clinic posted a month of wages with
+        nothing withheld.
+
+        So the question asked here is the stricter one — were these figures
+        produced under *these* rules — and the answer is a comparison of two
+        moments. A rule accepted after the run was last calculated means the
+        figures predate it, and the run has to be calculated again.
+        """
+        if run.calculated_at is None:
+            raise Conflict(
+                "This run has not been calculated yet.",
+                details={"status": run.status.value},
+            )
+        accepted = await self._rules.latest_approval_in_force(
+            organization_id=organization_id, on_date=run.period_end
+        )
+        if accepted is not None and accepted > run.calculated_at:
+            raise Conflict(
+                "A statutory rule was approved after this payroll was "
+                "calculated, so its payslips were worked out under different "
+                "rules. Calculate it again before approving it.",
+                details={
+                    "calculated_at": run.calculated_at.isoformat(),
+                    "rule_approved_at": accepted.isoformat(),
+                },
+            )
 
     async def _refuse_if_blocked(self, *, organization_id: uuid.UUID, run: PayrollRun) -> None:
         """Re-checked here, not trusted from the row written at calculation."""
@@ -527,6 +580,7 @@ class PayrollRunService:
                 details={"status": run.status.value},
             )
         await self._refuse_if_blocked(organization_id=organization_id, run=run)
+        await self._refuse_if_stale(organization_id=organization_id, run=run)
 
         views = await self.payslips(organization_id=organization_id, run_id=run_id)
         if not views:

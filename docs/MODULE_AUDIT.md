@@ -56,7 +56,7 @@ Legend: ● built and verified · ◐ partial · ○ absent
 | 6 | Purchases | ● | ● | ● | ● | ◐ GRNI accrual (P5) |
 | 7 | Inventory | ● | ● | ● | ● | ◐ valuation (I1) |
 | 8 | Employees | ● | ● | ● | ● | ◐ statutory timesheet |
-| 9 | Payroll | ○ | ○ | ○ | ○ | ○ |
+| 9 | Payroll | ● | ● | ● | ● | ◐ blocked on P2, 2018 tax (P10), commission (P3) |
 | 10 | Accounting | ● | ● | ● | ● | ◐ asset accounting |
 | 11 | Reports | ● | n/a | ● | ● | ◐ statutory forms (A2, A3) |
 | 12 | Documents | ○ | ○ | ○ | ○ | ○ |
@@ -182,23 +182,33 @@ rather than duplicate.
 **Blocked on:** nothing. P1 (Uzbek timesheet code wording) affects labels only
 and can ship with the codes shown untranslated and marked.
 
-### 9. Payroll — ○
+### 9. Payroll — ●/◐
 
-**Everything.** Needs: compensation rule (fixed, percentage, fixed+commission),
-payroll run, payslip, payslip line, payroll payment.
+**Works:** statutory rules as dated, approved, sourced rows with supersession;
+salary agreements per employee, a rise being a new row; proration by days
+actually worked, read from the timesheet; employee deductions and employer
+contributions kept in separate categories; bonuses and agreed deductions, each
+requiring a reason; calculate / approve / post / pay as four acts with four
+permissions and the calculator barred from approving; payslips that keep their
+own amounts, rates and rule versions; one accounting entry per run, built from
+the clinic's own posting rules; payslip and run screens in three languages,
+driven in a browser.
 
-**Has already:** five `payroll.*` permissions; the
-`payroll.run.calculate` / `payroll.run.approve` segregation pair;
-`SourceKind.PAYROLL_RUN`; `payroll.rules.manage` — a permission that exists
-precisely so statutory rules are versioned data, not code.
+**Refuses, by design:** a run cannot be approved or posted while a required
+statutory rule is unapproved, and the refusal names the rule and the open
+question behind it. Because the current social tax rate is unverified (P2),
+**every run today is blocked**, which is the control working rather than a gap.
+It also refuses a run whose payslips were calculated before the rules now in
+force were approved — found by the browser pass, which posted a month of wages
+with no tax at all before the guard existed (ADR-063).
 
-**Blocked on:** **P2 — current payroll tax rules are unverified**, and **P3 —
-commission basis undecided.** Gross pay, bonuses, advances and deductions are
-computable without either. Statutory withholding is not, and must stay
-unavailable rather than be guessed. Plan: a payroll run computes and posts
-gross cost and net pay; every statutory line is produced only from an approved,
-versioned rule record, and a run containing an unapproved statutory rule
-refuses to post and says which rule is missing.
+**Missing:** 2018's progressive income tax, whose calculation is absent from
+the workbook itself (P10); percentage and commission pay, which needs P3;
+the statutory payroll reports and certificates.
+
+**Blocked on:** **P2 — the current social tax rate**, which blocks posting
+outright; P3 — commission basis; P10 — the 2018 income tax macro. Gross pay,
+proration, bonuses and deductions all compute without any of them, and do.
 
 ### 10. Accounting — ●/◐
 

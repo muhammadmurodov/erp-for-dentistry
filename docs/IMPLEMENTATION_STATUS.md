@@ -1,6 +1,6 @@
 # Implementation status
 
-**Last updated:** 2026-11-04 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete; employees, purchasing, inventory and management reporting built on top of them. A full module audit is in `MODULE_AUDIT.md`; payroll, documents and hardening are the remaining work.**
+**Last updated:** 2026-11-04 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete; employees, purchasing, inventory, management reporting and payroll built on top of them. A full module audit is in `MODULE_AUDIT.md`; documents and hardening are the remaining work. Payroll computes, approves and posts, and is blocked from posting today because the current social tax rate is unverified (P2) — which is the control working, not a gap.**
 
 The authoritative record of what works. The application serves the same
 information from `GET /api/v1/platform/modules`, and an integration test
@@ -1455,6 +1455,125 @@ and line mappings are `OPEN_QUESTIONS.md` A2, the cash flow method is A3,
 and a VAT return depends on A5. Every *management* report a clinic runs is
 built and reconciles to the ledger.
 
+## Payroll · Built, and deliberately blocked
+
+Phase 5's second half. The clinic has three family-member employees and one
+of them does the books, so the module is built around the one thing that
+makes a payroll trustworthy at that size: **no figure on it comes from
+anywhere but an approved, dated rule**, and the system would rather refuse to
+pay anybody than guess a tax rate.
+
+### What it does
+
+- **Statutory rules are rows, not constants** (ADR-062). Each carries its
+  kind, method, rate, effective dates, legal reference, source URL and
+  approver. Approving one closes the rule it replaces on the day before and
+  never edits it away, because a payslip from an earlier period cites it.
+  A `DRAFT` rule is invisible to the engine; approval is refused without a
+  legal reference; and no endpoint carries a rate beside a payslip.
+- **Salary agreements are history.** A rise is a new row with its own
+  effective date. The salary "now" is a question about a date, and a change
+  mid-month is paid at each rate for the days worked under it, counted from
+  the timesheet on each side of the change.
+- **Proration is from the timesheet**, never from an assumption: the run
+  records the month's working days and the days worked come from attendance.
+- **Employee deductions and employer contributions are different things.**
+  Social tax is the only kind whose category is a contribution, so the
+  workbook's classic error is hard to write; a test raises the social tax and
+  asserts nobody's net pay moves. INPS is declared a component of the income
+  tax and comes out of it rather than on top — the 12.1% defect the formula
+  audit found is not expressible here.
+- **Four acts, four permissions**: calculate, approve, post, pay. Calculating
+  commits nothing. The person who calculated cannot approve, even holding
+  both permissions, which in a clinic of three they will.
+- **One accounting entry per run**, built from the clinic's own posting rules
+  — 9420/6710 for the wage, 6710/6411 for the withholding, 6411/6520.02 for
+  the INPS component, 9420/6520.01 for the employer's social tax — each rule
+  citing the workbook row it came from. The expense is gross plus the
+  employer's own contributions. Paying settles the debt and recognises
+  nothing further.
+- **Adjustments require a reason** and are audited, which is the control the
+  workbook's nine undocumented corrections lacked.
+
+### Why it reports `partial`, and why nothing posts today
+
+The current social tax rate could not be confirmed from an authoritative
+source during the formula audit (`OPEN_QUESTIONS.md` P2), so **nothing is
+seeded for it and every run is blocked** — at approval and again at posting,
+with the refusal naming the rule and the question behind it. An accountant
+entering and approving that rate unblocks it; nobody else can, and no
+default is supplied. 2018's progressive income tax is absent because its
+calculation is missing from the workbook itself (P10). Percentage and
+commission pay waits on P3.
+
+### A known limitation: rates only go forward
+
+Approving a rule is refused when an approved rule of the same kind already
+starts on or after that date. Rates are therefore only ever *added going
+forward*, which is right for the ordinary case — a new rate supersedes the
+one before it — and wrong for one the clinic will meet.
+
+P2 asks for the prior versions with their date ranges, so that recalculating
+an earlier period uses the rules that applied then. Once the current rate is
+approved, those earlier versions can no longer be entered: each would have to
+start before the approved one, which is exactly what the guard refuses. The
+workaround is to enter the answer oldest first, and the refusal's own advice
+— "date this one earlier" — is misleading, because earlier is the direction
+that fails.
+
+Noted rather than fixed: changing it means deciding what approving a rule
+*behind* an existing one does to the periods already computed under the
+later one, which is a supersession question and not a validation tweak. It
+does not block anything today, because no prior version has been supplied.
+The browser pass hits it on a second run against the same tenant and says so.
+
+### Verified
+
+- 65 backend tests. The payslip is checked against figures worked out by
+  hand — 2,000,000 a month, 11 of 22 days: gross 1,000,000, income tax
+  120,000 of which 1,000 is INPS, net 880,000, and 120,000 of employer cost
+  beside it — and the ledger is checked to move the expense by gross plus
+  employer cost, to clear on payment without recognising more, to refuse a
+  second posting, and to leave the balance sheet balancing.
+- 35 frontend unit tests over what the screen may offer and the arithmetic
+  it shows, including that the cost to the clinic is gross *plus* the
+  employer contribution and is not net pay.
+- `frontend/e2e/payroll.cjs`: 15 steps in a real Chrome, 0 problems, run
+  against a database migrated from nothing — which is also the only thing
+  that exercises all seventeen migrations in order against a real PostgreSQL.
+  **It found four defects on its first complete run**, and they are why this
+  section exists in this form.
+
+### Found by running the payroll pass in a browser
+
+**A run calculated before the rates were approved could be approved and
+posted** (ADR-063). The gate asked whether every required rule *is* approved,
+which it was — somebody had accepted them in between — rather than whether
+these payslips were produced under them. They were not: they carried no tax
+at all, and a month of wages posted with nothing withheld and net pay equal
+to gross. Thirteen backend tests covered this module's refusals and none
+covered this sequence, because each of them approved the rates before
+calculating, which is what a careful person does and not what a hurried one
+does. Approval and posting now compare the run's calculation time against the
+newest rule governing the period and refuse with the remedy named.
+
+**Recalculating a run crashed**, which is why the first defect could hide. A
+payslip was deleted in the same flush as its own lines, whose foreign key is
+`RESTRICT` — deliberately, so no amount can lose the payslip it belongs to —
+and PostgreSQL refused the statement. The models carry no relationship
+between the two, so the unit of work had nothing to order them by. The fix is
+a flush between the two loops.
+
+**A settled run kept showing the reasons it was once blocked for.** The list
+endpoint returns the reasons stored when the run was last calculated, which
+is a snapshot; the detail endpoint re-asks. The screen now reads the detail,
+and approval clears the stored note.
+
+**The cost to the clinic fell off the right edge** of the payslip table at
+desktop width, inside the column beside the run list — the one figure a clinic
+most needs from a payroll, hardest to see. The payslips now occupy the full
+width of the page.
+
 ## Next step
 
 The order comes from `docs/MODULE_AUDIT.md`, which audited all thirteen
@@ -1463,10 +1582,10 @@ modules against the code rather than against this document:
 1. ~~**Employees**~~ — done, above.
 2. ~~**Purchasing**~~ — done, above.
 3. ~~**Inventory**~~ — done, above.
-4. **Payroll** — depends on (1). Gross cost and net pay ship; every statutory
+4. ~~**Payroll**~~ — done, below. Gross cost and net pay ship; every statutory
    line is produced only from an approved, versioned rule, and a run holding
    an unapproved one refuses to post and names it. `P2` and `P3` stay
-   unanswered and nothing is guessed.
+   unanswered and nothing is guessed, so every run today is blocked.
 5. ~~**Reports**~~ — done, above. Statutory filing forms stay blocked on
    `A2` and `A3`.
 6. **Documents** — deliberately late: it attaches to records that must exist.

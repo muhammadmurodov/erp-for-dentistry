@@ -27,6 +27,7 @@ from app.modules.audit.models import AuditLog
 from app.modules.hr.enums import AttendanceCode
 from app.modules.payroll.enums import (
     AdjustmentKind,
+    PayrollRunStatus,
     RuleMethod,
     StatutoryRuleKind,
 )
@@ -368,6 +369,126 @@ class TestAFullRun:
             organization_id=sales.id, as_of=MARCH_END
         )
         assert sheet.balances, f"difference {sheet.difference}"
+
+
+class TestFiguresMatchTheRulesTheyWereMadeUnder:
+    """The defect a browser pass found, and the guard that now refuses it.
+
+    Every rule being approved is not the same as the payslips having been
+    worked out under them. A run calculated while nothing was approved, and
+    approved after somebody accepted the rates, passed the missing-rule
+    check and posted a month of wages with no tax withheld at all.
+    """
+
+    async def test_approval_is_refused_when_a_rate_arrived_after_the_figures(
+        self, payroll, payroll_rules, employees, compensation, attendance, sales, org_a
+    ) -> None:
+        owner = org_a.owner.id
+        accountant = org_a.members["accountant"][0].id
+        employee = await an_employee(employees, sales)
+        await compensation.set_salary(
+            organization_id=sales.id,
+            employee_id=employee.id,
+            amount=Decimal("2000000"),
+            effective_from=date(2025, 1, 1),
+        )
+        await worked_days(attendance, sales, employee, 11)
+        run = await a_run(payroll, sales)
+
+        # Calculated first, with nothing approved: a payslip with no tax.
+        await payroll.calculate(organization_id=sales.id, run_id=run.id, actor_user_id=owner)
+        untaxed = (await payroll.payslips(organization_id=sales.id, run_id=run.id))[0].payslip
+        assert untaxed.employee_deductions == Decimal("0.00")
+
+        # The rates are accepted afterwards, which satisfies the
+        # missing-rule check on its own.
+        for kind, rate in (
+            (StatutoryRuleKind.INCOME_TAX, "12"),
+            (StatutoryRuleKind.SOCIAL_TAX, "12"),
+        ):
+            await approved_rule(payroll_rules, sales, kind, rate, actor=owner)
+        assert (
+            await payroll.blocking_reasons(organization_id=sales.id, on_date=run.period_end)
+        ) == []
+
+        with pytest.raises(Conflict, match="calculated"):
+            await payroll.approve(
+                organization_id=sales.id, run_id=run.id, actor_user_id=accountant
+            )
+
+    async def test_posting_is_refused_for_the_same_reason(
+        self, payroll, payroll_rules, employees, compensation, attendance, sales, org_a
+    ) -> None:
+        """Checked again at the ledger, not trusted from the approval."""
+        owner = org_a.owner.id
+        accountant = org_a.members["accountant"][0].id
+        for kind, rate in (
+            (StatutoryRuleKind.INCOME_TAX, "12"),
+            (StatutoryRuleKind.SOCIAL_TAX, "12"),
+        ):
+            await approved_rule(payroll_rules, sales, kind, rate, actor=owner)
+        employee = await an_employee(employees, sales)
+        await compensation.set_salary(
+            organization_id=sales.id,
+            employee_id=employee.id,
+            amount=Decimal("2000000"),
+            effective_from=date(2025, 1, 1),
+        )
+        await worked_days(attendance, sales, employee, 11)
+        run = await a_run(payroll, sales)
+        await payroll.calculate(organization_id=sales.id, run_id=run.id, actor_user_id=owner)
+        await payroll.approve(
+            organization_id=sales.id, run_id=run.id, actor_user_id=accountant
+        )
+
+        # A rate accepted between approval and posting makes the approved
+        # figures stale, and the ledger must not take them.
+        await approved_rule(
+            payroll_rules,
+            sales,
+            StatutoryRuleKind.EMPLOYEE_PENSION,
+            "8",
+            actor=owner,
+            effective_from=date(2026, 1, 1),
+        )
+        with pytest.raises(Conflict, match="calculated"):
+            await payroll.post(
+                organization_id=sales.id, run_id=run.id, actor_user_id=accountant
+            )
+
+    async def test_calculating_again_makes_it_approvable(
+        self, payroll, payroll_rules, employees, compensation, attendance, sales, org_a
+    ) -> None:
+        """The refusal is not a dead end: it names the remedy and it works."""
+        owner = org_a.owner.id
+        accountant = org_a.members["accountant"][0].id
+        employee = await an_employee(employees, sales)
+        await compensation.set_salary(
+            organization_id=sales.id,
+            employee_id=employee.id,
+            amount=Decimal("2000000"),
+            effective_from=date(2025, 1, 1),
+        )
+        await worked_days(attendance, sales, employee, 11)
+        run = await a_run(payroll, sales)
+        await payroll.calculate(organization_id=sales.id, run_id=run.id, actor_user_id=owner)
+        for kind, rate, component in (
+            (StatutoryRuleKind.INCOME_TAX, "12", None),
+            (StatutoryRuleKind.INPS, "0.1", StatutoryRuleKind.INCOME_TAX),
+            (StatutoryRuleKind.SOCIAL_TAX, "12", None),
+        ):
+            await approved_rule(
+                payroll_rules, sales, kind, rate, actor=owner, component_of=component
+            )
+        await payroll.calculate(organization_id=sales.id, run_id=run.id, actor_user_id=owner)
+        slip = (await payroll.payslips(organization_id=sales.id, run_id=run.id))[0].payslip
+        assert slip.gross == Decimal("1000000.00")
+        assert slip.employee_deductions == Decimal("120000.00")
+        assert slip.net == Decimal("880000.00")
+        approved = await payroll.approve(
+            organization_id=sales.id, run_id=run.id, actor_user_id=accountant
+        )
+        assert approved.status is PayrollRunStatus.APPROVED
 
 
 class TestHistoryStaysPut:

@@ -8,9 +8,10 @@ through a published service interface.
 
 **Current state: phases 1, 2 and 3 complete and verified — the foundation, the
 accounting engine, and sales, cash and banking on top of it. The clinic module
-(3c) is complete, and employees, purchasing, inventory and management
-reporting are built on top of it. Payroll and documents are not built yet;
-statutory filing forms wait on an accountant's answer.**
+(3c) is complete, and employees, purchasing, inventory, management reporting
+and payroll are built on top of it. Documents are not built yet; payroll
+computes and posts but refuses to post today, because the current social tax
+rate is unverified; statutory filing forms wait on an accountant's answer.**
 `docs/IMPLEMENTATION_STATUS.md` is the authoritative list of what works, down
 to which features have no interface; the application's own navigation marks
 unfinished modules rather than presenting them as done.
@@ -34,7 +35,8 @@ unfinished modules rather than presenting them as done.
 | Materials, stock as a movement ledger, counts, low stock and expiry | Working |
 | The clinic's day on the home screen | Working |
 | Profit and loss, balance sheet, ageing, cash movement, with exports | Working |
-| Payroll, documents | **Not built — phases 5 and 7** |
+| Salaries, payroll runs, payslips and their posting | Working — **refuses to post until the tax rates are approved (P2)** |
+| Documents | **Not built — phase 7** |
 | Statutory filing forms | **Blocked — awaiting the accountant (A2, A3, A5)** |
 
 ## Quick start

@@ -232,6 +232,28 @@ class StatutoryRuleService:
             and (rule.effective_to is None or rule.effective_to >= on_date)
         ]
 
+    async def latest_approval_in_force(
+        self, *, organization_id: uuid.UUID, on_date: date
+    ) -> datetime | None:
+        """When the newest rule governing this date was accepted.
+
+        Used to tell a payroll run whether its payslips are still current. A
+        run calculated before this moment was worked out under rules that
+        have since changed, and the figures on it are stale even though
+        every rule it needs is now approved.
+        """
+        rules = await self.list_rules(
+            organization_id=organization_id, status=RuleStatus.APPROVED
+        )
+        stamps = [
+            rule.approved_at
+            for rule in rules
+            if rule.effective_from <= on_date
+            and (rule.effective_to is None or rule.effective_to >= on_date)
+            and rule.approved_at is not None
+        ]
+        return max(stamps) if stamps else None
+
     async def seed_verified_drafts(
         self, *, organization_id: uuid.UUID, actor_user_id: uuid.UUID | None = None
     ) -> list[StatutoryRule]:

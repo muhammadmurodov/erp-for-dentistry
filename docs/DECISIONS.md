@@ -1880,3 +1880,97 @@ developed" again.
 This is the general lesson of ADR-049 and ADR-051 once more: the system
 should state what it can and cannot do, and the statement should be generated
 rather than written by hand, because a hand-written one goes stale silently.
+
+---
+
+## ADR-062 — A statutory rate is a dated, approved, sourced row; a draft calculates nothing
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** The clinic's workbook kept tax rates in the formulas that used
+them: `=$I*12%` for social tax, `=$I*11.9%` beside `=$I*0.1%` for income tax
+and INPS. The formula audit found the predictable consequences. One employee
+was withheld 12.1% through every month of 2019, because the 0.1 percentage
+point of INPS is *part* of the 12% and that column charged it twice. All of
+2018's income tax is `#NAME?`, because the rate lived in a VBA function that
+is not in the workbook. Three months of 2023 were multiplied by zero and
+nobody can now say why.
+
+Each of those is the same mistake: a rate with no date, no authority and no
+approver, written where it was needed rather than recorded once.
+
+**Decision — the rate is the data.** A `statutory_rule` row carries its kind,
+its method, its rate, the date it takes effect, the date it stops, its legal
+reference, a source URL, and who approved it. Approving one closes the rule it
+replaces on the day before, and never edits it away: a payslip from 2019 cites
+the 2019 version and must stay readable. A rule is `DRAFT` until somebody with
+`payroll.rules.manage` approves it, **a draft is invisible to the calculation
+engine**, and approval is refused outright without a legal reference. No
+endpoint in the payroll router carries a rate alongside a payslip, and a test
+asserts that, so a rate has exactly one way in.
+
+**And nothing current is seeded.** The seeder proposes only the three rates
+the workbook audit verified against sources — income tax at 12% from
+2019-01-01, the 0.1 point of INPS inside it, and the 8% employee pension
+confined to 2018 — each as a draft carrying its citation. The current social
+tax rate could not be confirmed (OPEN_QUESTIONS P2), so **nothing is proposed
+for it**, and the visible consequence is that every run today is blocked and
+says so by name. That is the intended behaviour. A system that guessed the
+rate would be more convenient and would be lying.
+
+**Consequences.** Payroll cannot run until an accountant does their part,
+which is the correct dependency and an uncomfortable one. In exchange, every
+figure on every payslip can be traced to the rule version that produced it,
+a period before 2019 computes on the 2019 rules only if somebody dated them
+that way, and the 12.1% defect is not expressible: INPS is declared a
+component of the income tax, and the engine refuses a component whose parent
+is absent or smaller than it.
+
+---
+
+## ADR-063 — Figures must have been produced under the rules now in force
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** ADR-062 gives payroll a gate: a run cannot be approved or posted
+while a rule it needs is unapproved. The first complete browser pass walked
+straight through it.
+
+The sequence was the ordinary one. A month is opened and calculated while the
+rates are still drafts, so the payslips come out with no tax on them. The
+accountant then approves the rates. Approval of the run is now attempted, the
+gate asks *are all the required rules approved*, the answer is yes — and the
+run is approved, posted and paid. The clinic had just posted a month of wages
+with nothing withheld, nothing owed to the budget, and a net pay equal to
+gross. Every unit test passed, because every one of them approves the rules
+before calculating, which is what a person would do and not what a person
+always does.
+
+The gate asked the wrong question. "Is every rule approved" is not "were
+these figures produced under them".
+
+**Decision — compare the two moments.** Approval and posting both refuse when
+any statutory rule governing the period was approved *after* the run was last
+calculated, naming the remedy: calculate it again. The comparison is between
+`payroll_run.calculated_at` and the newest `approved_at` among the rules in
+force on the period's end date. It is checked at approval and again at
+posting, not trusted from the approval, for the same reason the missing-rule
+check is.
+
+A timestamp comparison rather than comparing which rule versions the payslip
+lines cite: a rule in force can legitimately produce no line — an employee who
+worked no days earns nothing to withhold from — so comparing the sets would
+refuse runs that are perfectly correct.
+
+**Consequences.** The window in which stale figures can be approved is gone,
+and the cost is an extra recalculation whenever a rate is accepted
+mid-preparation, which is one button and is what the person meant to do.
+
+Two lessons recorded rather than learned twice. The first is that a guard
+expressed as "the prerequisite exists" is weaker than one expressed as "the
+output was produced from the prerequisite", and the stronger form is usually
+available for the price of a timestamp. The second is about testing: thirteen
+backend tests covered this module's refusals and none covered this sequence,
+because each of them set the world up correctly before acting. The browser
+pass found it on its first complete run, and found it precisely because it
+does things in the order a hurried person would.
