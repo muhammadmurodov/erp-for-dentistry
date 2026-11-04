@@ -127,6 +127,22 @@ date did the current treatment apply? If exempt, what are the ~2.9 M UZS of
 
 ---
 
+**New evidence (2026-11-04, from the formula audit).** The clinic's own
+fiscal receipts answer the factual half of this question. Across 2025-01 to
+2025-03, 298 receipt lines carry **zero VAT**. From 2025-04 onward, **every
+line carries VAT at exactly 12.00%**, computed as
+`price − ROUNDUP(price ÷ 1.12, 2)` — that is, VAT included in the displayed
+price, which is the `VAT_INCLUSIVE` treatment this system defines and refuses
+to apply while this question is open.
+
+So dental services at this clinic do bear 12% VAT, from **1 April 2025**.
+What remains unanswered is **why** — a turnover threshold crossed, or
+voluntary registration — which decides whether the treatment is right going
+forward, and what becomes of the three VAT-free months of 2025. See
+`WORKBOOK_FORMULA_AUDIT.md`.
+
+---
+
 ### A6 — What is the cut-over date, and who signs the opening balances? · Blocking go-live
 **Needed from:** owner and accountant
 
@@ -391,6 +407,89 @@ must be explicit, and the system will not assume two bases are equivalent.
 treatments** or of **collected payments**? These differ whenever a payment is
 late or never arrives, and the difference is real money. What percentage, and
 does it vary by service? Is commission paid on a refunded treatment?
+
+---
+
+### P6 — Why was income tax zeroed in three months of 2023? · Blocking historical payroll entry
+**Needed from:** accountant
+
+**Evidence.** The payroll sheet multiplies income tax and INPS by zero for
+both employees in 2023-01, 2023-10 and 2023-12, and applies a deduction of
+exactly 1,744,490 to one employee in 2023-02. Together these withhold
+**1,537,338 UZS less** than 12% of the accrued pay. The `*0` was typed
+deliberately, so it is not a formula slip.
+
+**Asked as:** was there an exemption, a correction of earlier
+over-withholding, or a mistake? If an exemption, under what rule and for
+which months?
+
+**What the system does meanwhile.** 2023 payroll is not entered. Nothing is
+recomputed and nothing is corrected.
+
+---
+
+### P7 — Why was social tax 1% from May to December 2020? · Blocking historical payroll entry
+**Needed from:** accountant
+
+**Evidence.** Column Q drops from 12% to 1% for 2020-05 through 2020-12 and
+returns to 12% in 2021-01. A pandemic relief measure is the obvious
+hypothesis; it could not be confirmed from any authoritative source during
+the formula audit.
+
+**Asked as:** which instrument reduced the rate, and for what period and
+which taxpayers?
+
+**What the system does meanwhile.** The 1% rate is not implemented. An
+unverified statutory rate is not a rate.
+
+---
+
+### P8 — Nine undocumented manual corrections in payroll · Blocking historical payroll entry
+**Needed from:** accountant
+
+**Evidence.** Hardcoded differences typed into columns Y, Z and AA of the
+payroll sheet — for example `=8555.2-1755.2`, `=(18662.4-41337.96)` and
+`=51321.6-132340.79`. One reduces a 2019-03 net pay by **103,694.75 UZS**.
+None carries a reason.
+
+**Asked as:** what was each correction for? Were they agreed with the
+employee, and were they reported?
+
+**What the system does meanwhile.** The ERP will accept a payroll adjustment
+only with a reason and an authoriser, and will record both (brief §6.16).
+These historical ones are not carried over.
+
+---
+
+### P9 — The 2018 INPS report rate contradicts the INPS deduction · Non-blocking
+**Needed from:** accountant
+
+**Evidence.** For 2018 the payroll sheet computes the INPS deduction at 0.1%
+in one column and grosses it up at **2%** in the column headed "income in the
+INPS report". Both cannot describe the same contribution.
+
+**Asked as:** which rate was reported to the pension fund for 2018, and does
+the discrepancy affect any filed certificate?
+
+**What the system does meanwhile.** No INPS report is produced.
+
+---
+
+### P10 — The 2018 income tax macro is missing · Blocking 2018 payroll reproduction
+**Needed from:** the clinic (the file), then the accountant
+
+**Evidence.** The 2018 income tax was computed by a VBA function
+`daromadsoligi2018`, which **is not in this workbook** — its VBA project
+contains only a regular-expression helper. All 24 of those cells, and the net
+pay depending on them, currently evaluate to `#NAME?`. The workbook's defined
+names point at another file on OneDrive, under a sheet called `Подоход`,
+which is where the function and the 2017 minimum-wage constant appear to
+live.
+
+**Asked as:** please supply that workbook, or the 2018 payroll as filed.
+
+**What the system does meanwhile.** 2018 payroll cannot be reproduced from
+this file at all. It is not estimated.
 
 ---
 

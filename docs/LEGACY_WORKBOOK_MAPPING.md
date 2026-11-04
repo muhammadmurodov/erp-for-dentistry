@@ -3,6 +3,14 @@
 What the clinic's existing Excel workbook contains, what it reveals about
 current practice, and where each concept lands in the new system.
 
+**A formula-level audit of the same workbook is in
+`WORKBOOK_FORMULA_AUDIT.md`** (2026-11-04): every calculated field, its
+dependencies, the period it governed, and whether it is safe to reproduce.
+That document supersedes this one wherever the two overlap, because it reads
+the formulas rather than the layout — including the finding that the clinic
+began charging 12% VAT on 1 April 2025, which bears on `OPEN_QUESTIONS.md`
+A5.
+
 **Method.** The workbook was read with `openpyxl` in read-only mode. Its
 macros were never executed and the file was never modified. Analysis ran
 against a copy in a scratch directory.
