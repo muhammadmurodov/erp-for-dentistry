@@ -28,6 +28,8 @@ from app.core.money import ZERO
 from app.modules.accounting.services.numbering import next_number
 from app.modules.audit import events
 from app.modules.audit.service import AuditRecorder
+from app.modules.inventory.services.catalogue import CatalogueService
+from app.modules.inventory.services.stock import StockService
 from app.modules.purchasing.enums import RECEIVABLE_ORDER_STATUSES, OrderStatus
 from app.modules.purchasing.models import (
     GoodsReceipt,
@@ -45,6 +47,15 @@ class ReceiptLineInput:
     unit: str | None = None
     rejected_quantity: Decimal = ZERO
     rejected_reason: str | None = None
+    #: Naming a stocked material is what puts this line on a shelf. Left out
+    #: for anything the clinic does not keep stock of — a repair, a delivery
+    #: charge, a one-off.
+    item_id: uuid.UUID | None = None
+    #: Which shelf. The organization's default is used when it is not said.
+    location_id: uuid.UUID | None = None
+    #: The lot number printed on the box, for a material tracked by batch.
+    batch_code: str | None = None
+    batch_expires_on: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +76,8 @@ class ReceivingService:
         self._audit = audit
         self._orders = PurchaseOrderService(session, audit)
         self._suppliers = SupplierService(session, audit)
+        self._stock = StockService(session, audit)
+        self._catalogue = CatalogueService(session, audit)
 
     async def list_receipts(
         self,
@@ -227,17 +240,25 @@ class ReceivingService:
                     "That line is not on this order",
                     details={"order_line_id": str(line.order_line_id)},
                 )
-            self._session.add(
-                GoodsReceiptLine(
-                    organization_id=organization_id,
-                    receipt_id=receipt.id,
-                    order_line_id=line.order_line_id,
-                    description=line.description.strip(),
-                    quantity=line.quantity,
-                    unit=line.unit,
-                    rejected_quantity=line.rejected_quantity,
-                    rejected_reason=(line.rejected_reason or "").strip() or None,
-                )
+            receipt_line = GoodsReceiptLine(
+                organization_id=organization_id,
+                receipt_id=receipt.id,
+                order_line_id=line.order_line_id,
+                item_id=line.item_id,
+                description=line.description.strip(),
+                quantity=line.quantity,
+                unit=line.unit,
+                rejected_quantity=line.rejected_quantity,
+                rejected_reason=(line.rejected_reason or "").strip() or None,
+            )
+            self._session.add(receipt_line)
+            await self._session.flush()
+            await self._shelve(
+                organization_id=organization_id,
+                line=line,
+                receipt_line=receipt_line,
+                received_on=receipt.received_on,
+                actor_user_id=actor_user_id,
             )
         await self._session.flush()
 
@@ -264,6 +285,68 @@ class ReceivingService:
             },
         )
         return receipt
+
+    async def _shelve(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        line: ReceiptLineInput,
+        receipt_line: GoodsReceiptLine,
+        received_on: date,
+        actor_user_id: uuid.UUID | None,
+    ) -> None:
+        """Put an accepted quantity on a shelf, in the same transaction.
+
+        **Still posts nothing.** This moves a quantity, not an amount: what
+        the delivery cost reaches the books when the supplier invoice is
+        registered, exactly as it did before inventory existed.
+
+        Only what was *accepted* is shelved. Goods turned away at the door
+        never entered the clinic, and recording them as stock and then
+        writing them off again would invent two movements for something that
+        never happened.
+        """
+        if line.item_id is None:
+            return
+        accepted = line.quantity - line.rejected_quantity
+        if accepted <= ZERO:
+            return
+
+        item = await self._catalogue.get_item(
+            organization_id=organization_id, item_id=line.item_id
+        )
+        location_id = line.location_id
+        if location_id is None:
+            location_id = (
+                await self._catalogue.default_location(organization_id=organization_id)
+            ).id
+
+        batch_id = None
+        if item.is_batch_tracked:
+            if not (line.batch_code or "").strip():
+                raise ValidationFailed(
+                    f"{item.name} is tracked by batch, so this delivery has to "
+                    "say which lot arrived",
+                    details={"item_id": str(item.id)},
+                )
+            batch = await self._catalogue.ensure_batch(
+                organization_id=organization_id,
+                item_id=item.id,
+                code=line.batch_code or "",
+                expires_on=line.batch_expires_on,
+            )
+            batch_id = batch.id
+
+        await self._stock.receive(
+            organization_id=organization_id,
+            item_id=item.id,
+            location_id=location_id,
+            quantity=accepted,
+            receipt_line_id=receipt_line.id,
+            batch_id=batch_id,
+            occurred_on=received_on,
+            actor_user_id=actor_user_id,
+        )
 
     async def uninvoiced_receipt_lines(
         self, *, organization_id: uuid.UUID, supplier_id: uuid.UUID

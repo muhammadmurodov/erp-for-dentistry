@@ -229,6 +229,9 @@ class PurchaseOrderLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     organization_id: Mapped[uuid.UUID] = _org_column()
     order_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    #: The stocked material this line is for, when it is one. Null for
+    #: anything the clinic does not keep on a shelf.
+    item_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
     description: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(QuantityType, nullable=False)
     unit: Mapped[str | None] = mapped_column(String(16))
@@ -239,6 +242,9 @@ class PurchaseOrderLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         *_org_scope("purchase_order_line"),
         _parent_fk(
             "purchase_order_line", "order_id", "purchase_order", "fk_purchase_order_line_order"
+        ),
+        _parent_fk(
+            "purchase_order_line", "item_id", "inventory_item", "fk_purchase_order_line_item"
         ),
         CheckConstraint("quantity > 0", name="ck_purchase_order_line_quantity"),
         CheckConstraint("unit_price >= 0", name="ck_purchase_order_line_unit_price"),
@@ -286,6 +292,10 @@ class GoodsReceiptLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     organization_id: Mapped[uuid.UUID] = _org_column()
     receipt_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
     order_line_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    #: Naming the item is what puts the delivery on a shelf: receiving
+    #: writes a stock movement for every line that has one, so stock arrives
+    #: through the same door the money does, and never by hand afterwards.
+    item_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
     description: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(QuantityType, nullable=False)
     unit: Mapped[str | None] = mapped_column(String(16))
@@ -305,6 +315,9 @@ class GoodsReceiptLine(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "order_line_id",
             "purchase_order_line",
             "fk_goods_receipt_line_order_line",
+        ),
+        _parent_fk(
+            "goods_receipt_line", "item_id", "inventory_item", "fk_goods_receipt_line_item"
         ),
         CheckConstraint("quantity > 0", name="ck_goods_receipt_line_quantity"),
         CheckConstraint("rejected_quantity >= 0", name="ck_goods_receipt_line_rejected"),

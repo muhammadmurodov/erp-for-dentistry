@@ -49,12 +49,12 @@ Legend: ● built and verified · ◐ partial · ○ absent
 | # | Module | Backend | DB | Frontend | Tests | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Dashboard | ● | ● | ● | ● | ◐ no trends |
-| 2 | Clinic | ● | ● | ● | ● | ◐ materials (phase 4) |
+| 2 | Clinic | ● | ● | ● | ● | ◐ recall and reminders |
 | 3 | Sales | ◐ | ● | ● | ● | ◐ credit notes, VAT |
 | 4 | Cash | ● | ● | ● | ● | ◐ transfers |
 | 5 | Banking | ● | ● | ● | ● | ◐ outgoing lines |
-| 6 | Purchases | ● | ● | ● | ● | ◐ GRNI accrual |
-| 7 | Inventory | ○ | ○ | ○ | ○ | ○ |
+| 6 | Purchases | ● | ● | ● | ● | ◐ GRNI accrual (P5) |
+| 7 | Inventory | ● | ● | ● | ● | ◐ valuation (I1) |
 | 8 | Employees | ● | ● | ● | ● | ◐ statutory timesheet |
 | 9 | Payroll | ○ | ○ | ○ | ○ | ○ |
 | 10 | Accounting | ● | ● | ● | ● | ◐ statements |
@@ -268,8 +268,8 @@ missing capability), numbering sequences, payment settings, custom role editing.
 | 1 | Clinic completion — plans, corrections, registry correction | **Done**, 2026-11-03 |
 | 2 | Employees — records, positions, rota, timesheet | **Done**, 2026-11-03 |
 | 3 | Purchasing | **Done**, 2026-11-03 |
-| 4 | Inventory | Next — started and reverted; see below |
-| 5 | Payroll | |
+| 4 | Inventory | **Done**, 2026-11-04 |
+| 5 | Payroll | Next |
 | 6 | Reports | |
 | 7 | Documents | |
 | 8 | Dashboard and navigation | |
@@ -288,13 +288,11 @@ Four defects were found that no test had caught:
   rule is absent (ADR-051). This also improves the existing debt write-off
   case, which has been failing with that same unhelpful 404 since Phase 3.
 
-**Inventory was started and backed out.** The models, enums and the
-organization-level `inventory_valuation_method` declaration were written and
-then reverted, because the increment could not be finished and leaving model
-definitions without their migration would have made the schema and the code
-disagree — every test run builds the database from `base`, so the suite would
-have failed on a tree that looked complete. The design reached before stopping
-is worth keeping:
+**Inventory was started, backed out, and then built.** The first attempt was
+reverted mid-increment rather than committed with models that had no
+migration — every test run builds the database from `base`, so the suite
+would have failed on a tree that looked complete. It was rebuilt on
+2026-11-04 to the design below, which survived the pause intact:
 
 - **Stock is a ledger, not a column.** No `quantity_on_hand`; what is on a
   shelf is the sum of its movements. Stock is counted physically often enough
@@ -314,6 +312,13 @@ is worth keeping:
   sits above inventory in the layering, so it may refer down to a stock
   movement; inventory referring up to a treatment is the dependency that
   stops a modular monolith being modular.
+
+A fifth defect was found while building inventory, and only a browser could
+have found it: the HTTP schema for a goods receipt line had no `item_id`, so
+a delivery recorded through the API named no material and **reached no
+shelf**, while every service test passed because the service itself was
+right. The gap was in the translation between the two. The regression test
+now sits at the HTTP layer, where the defect lived.
 
 One small finding is recorded and **not** fixed, to avoid re-verifying a
 screen mid-increment: the patient list's open control is labelled "Edit"

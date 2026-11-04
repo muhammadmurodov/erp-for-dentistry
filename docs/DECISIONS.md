@@ -1595,3 +1595,148 @@ what tells them to add the rule rather than file a bug.
 The general lesson is the same as ADR-049's: a control nobody has exercised
 is a claim. `A7` was designed to fail loudly and nobody had looked at what
 the failure said.
+
+## ADR-052 — Stock is a ledger of movements, never a stored quantity
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** The obvious shape for inventory is a `quantity_on_hand` column
+updated on every receipt and consumption. It reads fast and it is wrong in
+the way balances are always wrong: the column and the events that produced it
+drift, and nothing says which is right.
+
+The clinic counts its shelves. A stored total's drift therefore gets *found*
+— usually weeks later, usually by somebody blaming the person who counted.
+
+**Decision — there is no `quantity_on_hand` anywhere in this module.** What
+is on a shelf is `SUM(quantity)` over `stock_movement`, computed when asked,
+exactly as an account balance is the sum of its journal lines. Every movement
+is signed, names the record that caused it, and is never updated or deleted.
+
+A mistake is corrected by an approved count, which writes a further movement:
+both the error and the correction stay on the record.
+
+**Consequences.** A balance costs a grouped sum rather than a column read. At
+the volume a three-person dental clinic generates — a few thousand movements
+a year — that is indistinguishable, and the index on
+`(organization_id, item_id, location_id)` is there for when it is not.
+
+The test that matters is the one that deletes a movement and watches the
+balance change. A stored column would have kept answering the old number.
+
+## ADR-053 — Stock is counted long before it is costed
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** `OPEN_QUESTIONS.md` I1 — which inventory valuation method the
+clinic uses — has never been answered. The textbook response is to pick
+weighted average, since it is the common one. That would be inventing a
+statutory classification, which this project does not do.
+
+But *quantities* need no such answer. Knowing there are two boxes of
+composite left, and that a lot expires in three weeks, is the daily value of
+an inventory module and none of it depends on what the stock is worth.
+
+**Decision — the organization declares `inventory_valuation_method`, and it
+is `UNDECLARED` for everybody until an accountant says otherwise.** This is
+deliberately the same shape as the revenue tax treatment beside it (ADR-022).
+
+While it is undeclared: quantities are tracked from the first day, low stock
+is flagged, expiry is warned about, and `GET /inventory/valuation` returns
+**every quantity with every cost null** rather than refusing the page or
+guessing a number. A consumption records a quantity and **posts nothing** —
+what the material cost is already in the books, debited to 1010 when the
+supplier invoice was registered.
+
+`WEIGHTED_AVERAGE`, once declared, is derived from the supplier invoices
+already on file and needs no new storage. `FIFO` says it is not implemented,
+because it would need cost layers this system does not keep, and saying so is
+better than averaging and calling it FIFO.
+
+**Consequences.** The clinic gets the useful half of inventory immediately
+and the accounting half when somebody with authority answers one question.
+Nothing had to be built twice to achieve that.
+
+The module reports `partial` for exactly this reason, and the screen says so
+in the valuation panel rather than showing an empty table.
+
+## ADR-054 — Stock arrives through one door, and it is the delivery
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** Something has to create the movement that puts stock on a shelf.
+The easy answer is an "add stock" screen. The consequence of that answer is
+stock whose origin nobody can establish, and a quantity on a shelf that no
+delivery note explains.
+
+**Decision — there is no endpoint that creates a `RECEIPT` movement.**
+Recording a goods receipt in purchasing is what puts stock on a shelf: the
+receipt line names the material, and the accepted quantity becomes a movement
+in the same transaction. The API slice test asserts the *absence* of
+`POST /inventory/receipts`, because an absence nobody checks is an absence
+that gets filled in later by somebody being helpful.
+
+Only what was accepted is shelved. Goods turned away at the door never
+entered the clinic, and recording them as stock and writing them off again
+would invent two movements for something that never happened.
+
+**Consequences.** Stock cannot be created without a supplier and a delivery
+date, which is the point. The clinic that buys gypsum from a market stall
+still records the receipt — a receipt without an order was already allowed —
+so nothing is pushed off the books to avoid paperwork.
+
+The authorised way to disagree with the ledger is a counted difference
+approved by somebody who did not count it, not a correcting entry typed by
+whoever noticed.
+
+## ADR-055 — Valuation is composed in purchasing, to keep the graph acyclic
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** Valuing stock needs two things owned by two modules: **how
+much** is on the shelf, which is inventory's movement ledger, and **what it
+cost**, which is on the supplier invoices purchasing holds. Purchasing
+already calls inventory, to put a delivery on a shelf. Putting valuation
+inside inventory would make inventory call purchasing, and a cycle is how a
+modular monolith stops being modular.
+
+**Decision — `purchasing/services/stock_valuation.py`.** The module that
+already composes the other keeps the composition, the same shape as the cash
+module composing purchasing to pay a supplier out of the till (ADR-042). The
+API layer, which may import anything, serves it at `/inventory/valuation`
+because that is where somebody looks for it.
+
+Inventory itself has no concept of money: no cost column, no amount on a
+movement. What materials cost is in the ledger once, in account 1010.
+
+**Consequences.** The architecture guard keeps holding without an exception
+being added to it, which is the test of whether a layering rule is real.
+
+A weighted average is computed from registered bills only — a draft is what
+somebody typed, and a voided bill is one the clinic says never happened.
+
+## ADR-056 — A quantity is not money, and does not share its arithmetic
+
+**Status:** Accepted · 2026-11-04
+
+**Context.** The frontend has careful money arithmetic in `money.ts`: exact,
+in minor units, two decimal places, because that is the scale of a currency.
+The obvious move is to reuse it for stock quantities.
+
+It is wrong. A material is bought by the box and used by the millilitre, and
+`stock_movement.quantity` is `NUMERIC(20, 4)`. Running a quantity through the
+money helpers silently truncates 0.0005 of an anaesthetic to nothing.
+
+**Decision — `inventory.ts` carries its own four-decimal arithmetic**, in
+`bigint`, with the same discipline and a different scale, and a
+`displayQuantity` that drops trailing zeros for the reader.
+
+**Consequences.** Two small arithmetic modules instead of one, which is the
+right number: they model two different things that happen to both be
+decimals. The unit test that pins this asserts `0.0005 + 0.0005 = 0.001`,
+which the money helpers would have reported as zero.
+
+The display half of this was a real defect, found by driving the screen
+rather than by any test: the shelf read **"10.0000 box"** where the clinic
+counts ten boxes.
+

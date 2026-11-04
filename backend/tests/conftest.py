@@ -536,6 +536,38 @@ def attendance(db: AsyncSession, audit: AuditRecorder):
     return AttendanceService(db, audit)
 
 
+# --- inventory fixtures -----------------------------------------------------
+
+
+@pytest.fixture
+def catalogue(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.inventory.services.catalogue import CatalogueService
+
+    return CatalogueService(db, audit)
+
+
+@pytest.fixture
+def stock(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.inventory.services.stock import StockService
+
+    return StockService(db, audit)
+
+
+@pytest.fixture
+def stock_counts(db: AsyncSession, audit: AuditRecorder):
+    from app.modules.inventory.services.stock import StockAdjustmentService
+
+    return StockAdjustmentService(db, audit)
+
+
+@pytest.fixture
+def valuation(db: AsyncSession, audit: AuditRecorder):
+    """Quantities from inventory, prices from purchasing, composed above both."""
+    from app.modules.purchasing.services.stock_valuation import StockValuationService
+
+    return StockValuationService(db, audit)
+
+
 # --- purchasing fixtures ----------------------------------------------------
 
 

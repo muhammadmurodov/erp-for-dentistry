@@ -66,12 +66,10 @@ MODULES: tuple[ModuleInfo, ...] = (
     ModuleInfo(
         key="clinic",
         phase=3,
-        # PARTIAL still, but no longer for the old reason. The clinical side
-        # now has screens: a dentist records a tooth, corrects one, and runs
-        # a course of treatment from a browser. What keeps it short of
-        # available is that the materials a treatment consumes have nowhere
-        # to come from until inventory exists (phase 4), so the clinical
-        # record cannot yet say what was used.
+        # PARTIAL. The materials gap that kept it here is now closed —
+        # a dentist records what was used on a tooth and it comes off the
+        # shelf — so what is left is recall and reminders, which nobody has
+        # specified yet. Nothing is marked available on a plan to build it.
         status=ModuleStatus.PARTIAL,
         required_permission="clinic.patient.read",
         available_features=(
@@ -84,10 +82,12 @@ MODULES: tuple[ModuleInfo, ...] = (
             "correcting a recorded treatment, keeping the original and the reason",
             "courses of treatment across several visits, with their own life cycle",
             "drafting an invoice from completed treatment, once per item",
+            "materials used on a tooth, taken off the shelf as they are recorded",
             "payment: cash, card, advances, with a derived remaining balance",
         ),
         missing_features=(
-            "materials used in a treatment (inventory, phase 4)",
+            "what a material cost, on the treatment that used it "
+            "(the valuation method is undeclared — OPEN_QUESTIONS I1)",
             "recall and reminders for a patient due back",
         ),
     ),
@@ -181,12 +181,13 @@ MODULES: tuple[ModuleInfo, ...] = (
             "advances paid before an invoice, applied when one arrives",
             "a cash payment that moves the till as well as the ledger",
             "payables ageing, from the due date",
+            "a delivery of a stocked material puts it on the shelf",
         ),
         missing_features=(
             "goods received but not yet invoiced are not accrued "
             "(no approved account — see OPEN_QUESTIONS P5)",
-            "what the materials are worth, and where they sit afterwards "
-            "(inventory, phase 4)",
+            "what the stock on the shelf is worth: derivable from these bills, "
+            "but only once the valuation method is declared (OPEN_QUESTIONS I1)",
             "matching a supplier payment on a bank statement (phase 3d, "
             "outgoing lines)",
         ),
@@ -194,9 +195,33 @@ MODULES: tuple[ModuleInfo, ...] = (
     ModuleInfo(
         key="inventory",
         phase=4,
-        status=ModuleStatus.PLANNED,
+        # PARTIAL, and the reason is the one this module was always going to
+        # have: stock is counted but not costed. What a box of composite is
+        # *worth* on the shelf is OPEN_QUESTIONS I1 and nobody has answered
+        # it, so the organization declares its valuation method and the
+        # system refuses to invent one. Quantities, low stock and expiry all
+        # work without an answer; value waits for it.
+        status=ModuleStatus.PARTIAL,
         required_permission="inventory.item.read",
-        missing_features=("stock movements", "valuation", "batch and expiry tracking"),
+        available_features=(
+            "materials, categories, units and the shelves they are kept on",
+            "stock as a ledger of movements: a balance is always a sum",
+            "receiving: a delivery puts stock on the shelf, through purchasing",
+            "material used on a treatment, recorded against the tooth",
+            "batches and expiry dates, with what is about to go out of date",
+            "low stock, for the items somebody set a level on",
+            "a physical count, approved by somebody who did not count it",
+            "writing off broken or expired stock, with a reason, audited",
+            "transfers between shelves, as two movements that balance",
+            "refusing to take more off a shelf than is on it",
+        ),
+        missing_features=(
+            "what stock is worth: the valuation method is undeclared "
+            "(OPEN_QUESTIONS I1), so quantities are kept and value is refused",
+            "posting the cost of a material as it is used — same answer, same question",
+            "first-in-first-out costing, which would need cost layers this system "
+            "does not keep",
+        ),
     ),
     ModuleInfo(
         key="employees",

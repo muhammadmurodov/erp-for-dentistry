@@ -1315,3 +1315,163 @@ export interface SettlementHistoryRow {
   reversed_at: string | null
   reversal_reason: string | null
 }
+
+// --- inventory --------------------------------------------------------------
+
+/**
+ * Materials and the ledger of what moved.
+ *
+ * Quantities are strings for the same reason money is: a JavaScript number
+ * loses precision, and a stock count that reads 2.9999999999999996 gets
+ * written off by somebody.
+ */
+export interface InventoryItem {
+  id: string
+  code: string
+  name: string
+  unit: string
+  category_id: string | null
+  reorder_level: string | null
+  is_batch_tracked: boolean
+  notes: string | null
+  is_active: boolean
+}
+
+export interface InventoryCategory {
+  id: string
+  code: string
+  name: string
+  is_active: boolean
+}
+
+export interface StockLocation {
+  id: string
+  code: string
+  name: string
+  is_default: boolean
+  is_active: boolean
+}
+
+export interface StockBatch {
+  id: string
+  item_id: string
+  code: string
+  expires_on: string | null
+  notes: string | null
+}
+
+/** One shelf, one material, one lot — summed from the movements. */
+export interface StockBalanceRow {
+  item_id: string
+  item_code: string
+  item_name: string
+  unit: string
+  location_id: string
+  batch_id: string | null
+  batch_code: string | null
+  expires_on: string | null
+  quantity: string
+}
+
+export interface LowStockRow {
+  item_id: string
+  code: string
+  name: string
+  unit: string
+  on_hand: string
+  reorder_level: string
+}
+
+export interface ExpiringRow {
+  item_id: string
+  item_name: string
+  unit: string
+  batch_id: string
+  batch_code: string
+  expires_on: string
+  quantity: string
+  days_remaining: number
+}
+
+export type StockMovementKind =
+  | 'RECEIPT'
+  | 'CONSUMPTION'
+  | 'ADJUSTMENT'
+  | 'WRITE_OFF'
+  | 'TRANSFER_IN'
+  | 'TRANSFER_OUT'
+
+export type StockMovementSource =
+  | 'GOODS_RECEIPT_LINE'
+  | 'TREATMENT_ITEM'
+  | 'STOCK_ADJUSTMENT'
+  | 'STOCK_TRANSFER'
+  | 'MANUAL'
+
+export interface StockMovement {
+  id: string
+  item_id: string
+  location_id: string
+  batch_id: string | null
+  kind: StockMovementKind
+  quantity: string
+  occurred_on: string
+  source_kind: StockMovementSource
+  source_id: string | null
+  reason: string | null
+}
+
+export type AdjustmentStatus = 'DRAFT' | 'PROPOSED' | 'APPROVED' | 'REJECTED'
+
+export interface StockCount {
+  id: string
+  code: string
+  location_id: string
+  counted_on: string
+  status: AdjustmentStatus
+  reason: string
+  counted_by_user_id: string | null
+  decided_by_user_id: string | null
+  decision_note: string | null
+}
+
+export interface StockCountLine {
+  id: string
+  item_id: string
+  batch_id: string | null
+  system_quantity: string
+  counted_quantity: string
+  note: string | null
+}
+
+export interface StockCountDetail extends StockCount {
+  lines: StockCountLine[]
+}
+
+export type InventoryValuationMethod = 'UNDECLARED' | 'WEIGHTED_AVERAGE' | 'FIFO'
+
+export interface ValuationRow {
+  item_id: string
+  code: string
+  name: string
+  unit: string
+  quantity: string
+  unit_cost: string | null
+  value: string | null
+}
+
+/**
+ * Stock valued, or an honest statement that it cannot be.
+ *
+ * While `method` is `UNDECLARED` every `unit_cost` is null and `total_value`
+ * is null, but the quantities are real: the clinic sees what it has without
+ * the system inventing what it is worth.
+ */
+export interface StockValuation {
+  method: InventoryValuationMethod
+  currency: string
+  total_value: string | null
+  unpriced_items: number
+  rows: ValuationRow[]
+}
+

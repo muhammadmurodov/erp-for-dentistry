@@ -2,9 +2,14 @@
 
 ## Current state
 
-**613 backend tests and 129 frontend tests: 611 passed, 2 skipped
+**866 backend tests and 216 frontend tests: 864 passed, 2 skipped
 deliberately, 0 failed** (the two skips are explained below). Verified counts,
-from `pytest tests -q` and `vitest run`, last re-run 2026-11-02:
+from `pytest tests -q` and `vitest run`, last re-run 2026-11-04.
+
+The table below lists the suites that carry a rule worth naming; it is not
+the full file list. Three modules built since it was last extended —
+`tests/hr/` (85), `tests/purchasing/` (70) and `tests/inventory/` (73) — are
+summarised at the end of it rather than line by line.
 
 | Suite | Tests | Covers |
 | --- | --- | --- |
@@ -39,6 +44,9 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-02:
 | `tests/security/test_duty_separation.py` | 25 | The one-person-may-approve rule and its limits; the declaration and its audit record; closing a short till and refunding your own takings, with and without it; combined responsibilities on one person (ADR-041) |
 | `tests/security/test_permission_delivery.py` | 10 | That a permission in the code reaches the database: the catalogue is declared and frozen, every system role's grants match its definition both ways, and migration 0011's frozen list matches the catalogue it delivers (ADR-043) |
 | `tests/test_module_boundaries.py` | 9 | Architecture: no cycles, no reach-ins |
+| `tests/hr/` | 85 | The employment life cycle, every illegal transition, the login-link rules, attendance refusals, the month grid's year boundary, and who may reach each endpoint |
+| `tests/purchasing/` | 70 | That an order and a delivery post nothing, that a delivery line cannot be billed twice, the segregation refusals, partial payment, advances, ageing, and paying a supplier from the till |
+| `tests/inventory/` | 73 | That a balance is a sum and not a column, that no route can take a shelf below zero, that a consumption posts nothing, batches and expiry, low stock, and a count that only moves stock when somebody who did not count it approves (ADR-052 to ADR-055) |
 
 | Frontend suite | Tests | Covers |
 | --- | --- | --- |
@@ -48,6 +56,10 @@ from `pytest tests -q` and `vitest run`, last re-run 2026-11-02:
 | `src/lib/patientIdentity.test.ts` | 18 | Comparing two patient records: what must and must not count as a difference — case, spacing and telephone formatting are not differences, a blank is *missing* rather than conflicting, and the screen shows the original spelling |
 | `src/lib/refund.test.ts` | 17 | Which of the two refunds a payment is eligible for and why not, the refundable amount in `bigint` minor units, and the dialog refusing to submit more than there is — the same rules the service enforces under a row lock (ADR-045) |
 | `src/lib/appointments.test.ts` | 21 | The clinic's day in the browser, a local time rendered and parsed without a timezone shifting it, which actions a booking in each state may be offered, and the clash the form warns about before anything is sent (ADR-046, ADR-047) |
+| `src/lib/plans.test.ts` | 14 | The transition table a course of treatment offers, and what it refuses to offer |
+| `src/lib/employees.test.ts` | 19 | The employment transition table and the calendar arithmetic the timesheet grid uses |
+| `src/lib/purchasing.test.ts` | 16 | Order and bill states, and money summed in integer minor units |
+| `src/lib/inventory.test.ts` | 29 | Quantity arithmetic at four decimal places — which money's two would truncate — the expiry grading, the count difference, who may approve a count, and that a stored `10.0000` is shown to a clinic as ten (ADR-056) |
 
 **Two tests skip, and say why.** `test_a_written_off_bill_takes_no_payment`
 and `test_a_written_off_debt_owes_nothing_collectible`, both in
@@ -315,7 +327,7 @@ Stated plainly:
 ## Manual browser verification
 
 The interface has been driven end to end in a real Chrome via Playwright and
-each screen inspected, across ten passes:
+each screen inspected, across fourteen passes:
 
 * **Phase 1** — login, a rejected sign-in, the dashboard, a not-built-yet
   module page, the four settings tabs, the role dialog refusing a
@@ -382,6 +394,22 @@ each screen inspected, across ten passes:
   changes it. Driven by `frontend/e2e/policy.cjs`, which is re-runnable: it
   takes its effective date from whatever is in force and clears any draft an
   earlier run left behind.
+
+* **Courses of treatment** — a plan across visits, the moves it offers and
+  the ones it does not, a plan refusing to finish over an unfinished tooth,
+  and a correction that keeps the original. `frontend/e2e/plans.cjs`.
+* **Employees** — hiring, the rota, the monthly timesheet, ending an
+  employment, and a screen that offers no way to create a login.
+  `frontend/e2e/employees.cjs`.
+* **Purchasing** — order, deliver, invoice, pay, with the trial balance read
+  between every step. `frontend/e2e/purchasing.cjs`.
+* **Inventory** — a material reported low before anything is bought, a
+  delivery reaching the shelf while the ledger stays still, a refusal to take
+  eleven of ten that names what is there, a consumption that posts nothing, a
+  valuation that says no method has been chosen rather than inventing one, a
+  count that moves nothing until approved, and the owner who counted being
+  offered no approve button and refused by the server when they try anyway.
+  `frontend/e2e/inventory.cjs`, run twice in a row.
 
 Each run asserts there are no unexpected console errors or failed requests.
 The Phase 3d and 3c scripts additionally fail on a page wider than its

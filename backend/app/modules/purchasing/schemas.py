@@ -134,6 +134,8 @@ class OrderLineInputModel(BaseModel):
     quantity: Decimal = Field(gt=0)
     unit_price: Decimal = Field(ge=0)
     unit: str | None = Field(default=None, max_length=16)
+    #: The stocked material being ordered, when it is one.
+    item_id: uuid.UUID | None = None
 
     @field_validator("quantity", "unit_price", mode="before")
     @classmethod
@@ -158,6 +160,7 @@ class OrderStatusRequest(BaseModel):
 
 class OrderLineResponse(BaseModel, MoneyMixin):
     id: uuid.UUID
+    item_id: uuid.UUID | None
     description: str
     quantity: Decimal
     unit: str | None
@@ -210,6 +213,14 @@ class ReceiptLineInputModel(BaseModel):
     unit: str | None = Field(default=None, max_length=16)
     rejected_quantity: Decimal = Field(default=Decimal("0"), ge=0)
     rejected_reason: str | None = None
+    #: Naming a stocked material is what puts this line on a shelf: the
+    #: accepted quantity becomes a stock movement in the same transaction.
+    item_id: uuid.UUID | None = None
+    #: Which shelf. The organization's default is used when it is not said.
+    location_id: uuid.UUID | None = None
+    #: The lot number on the box, required for a material tracked by batch.
+    batch_code: str | None = Field(default=None, max_length=64)
+    batch_expires_on: date | None = None
 
     @field_validator("quantity", "rejected_quantity", mode="before")
     @classmethod
@@ -230,6 +241,7 @@ class ReceiptLineResponse(BaseModel, MoneyMixin):
     id: uuid.UUID
     receipt_id: uuid.UUID
     order_line_id: uuid.UUID | None
+    item_id: uuid.UUID | None
     description: str
     quantity: Decimal
     unit: str | None

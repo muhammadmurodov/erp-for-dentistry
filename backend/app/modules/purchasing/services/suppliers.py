@@ -83,6 +83,9 @@ class OrderLineInput:
     quantity: Decimal
     unit_price: Decimal
     unit: str | None = None
+    #: The stocked material being ordered, when it is one. Carried so that
+    #: the delivery can offer it without somebody re-typing it.
+    item_id: uuid.UUID | None = None
 
 
 class SupplierService:
@@ -508,6 +511,7 @@ class PurchaseOrderService:
                 PurchaseOrderLine(
                     organization_id=organization_id,
                     order_id=order.id,
+                    item_id=line.item_id,
                     description=line.description.strip(),
                     quantity=line.quantity,
                     unit=line.unit,

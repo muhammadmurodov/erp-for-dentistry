@@ -96,6 +96,15 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     #: column can be updated, an audit row cannot.
     duties_declared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    #: How stock on the shelf is costed. `UNDECLARED` until an accountant
+    #: answers `OPEN_QUESTIONS.md` I1: quantities are tracked from the first
+    #: day, and every question about *value* is refused until this is set.
+    #: Deliberately the same shape as the revenue tax treatment beside it —
+    #: an unanswered accounting choice is stated as unanswered, not guessed.
+    inventory_valuation_method: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="UNDECLARED", server_default="UNDECLARED"
+    )
+
     __table_args__ = (
         CheckConstraint("char_length(code) >= 2", name="code_min_length"),
         # A declaration without a date would leave nothing to reconcile the

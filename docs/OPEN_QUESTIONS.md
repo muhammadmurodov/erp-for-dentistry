@@ -390,12 +390,26 @@ acts.
 
 ## I. Inventory
 
-### I1 — Which inventory valuation method? · Blocking Phase 4
+### I1 — Which inventory valuation method? · Blocking stock *valuation* only
 **Needed from:** accountant
 
 **Asked as:** weighted average or FIFO for dental materials? Uzbek accounting
 standards may constrain the choice; please confirm which is permitted and
 which the clinic uses.
+
+**What the system does meanwhile (2026-11-04).** Inventory is built and
+stock is **counted but not costed** (ADR-053). `inventory_valuation_method`
+sits on the organization and is `UNDECLARED` for everybody: quantities,
+low-stock warnings, expiry warnings and material-per-treatment all work
+without an answer, and every question about *value* returns the real
+quantities with every cost null rather than a guessed number. A consumption
+records a quantity and posts nothing — what the material cost is already in
+the books, debited to 1010 when the supplier invoice was registered.
+
+Answering it is a one-field change. `WEIGHTED_AVERAGE` is then derived from
+the supplier invoices already on file and needs no new storage; `FIFO` would
+need cost layers this system does not keep and says so rather than averaging
+and calling it FIFO.
 
 ---
 

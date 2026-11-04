@@ -62,6 +62,7 @@ from app.modules.clinic.schemas import (
     SettlementView,
     TodayResponse,
     TreatmentItemResponse,
+    TreatmentMaterialRequest,
     TreatmentPlanDetail,
     TreatmentPlanResponse,
 )
@@ -69,6 +70,9 @@ from app.modules.clinic.services.patients import PatientService
 from app.modules.clinic.services.settlement import SettlementService
 from app.modules.clinic.services.today import TodayService
 from app.modules.clinic.services.treatments import ItemInput, TreatmentService
+from app.modules.inventory.enums import StockMovementKind
+from app.modules.inventory.schemas import MovementResponse
+from app.modules.inventory.services.stock import StockService
 from app.modules.sales.enums import InvoiceStatus
 from app.modules.sales.schemas import InvoiceResponse
 from app.modules.sales.services.billing import BillingService
@@ -818,6 +822,69 @@ async def correct_item(
     )
     await db.commit()
     return TreatmentItemResponse.model_validate(item)
+
+
+@router.get(
+    "/treatments/{item_id}/materials",
+    response_model=list[MovementResponse],
+    dependencies=[Depends(require_permissions("clinic.clinical.read"))],
+)
+async def list_treatment_materials(
+    item_id: uuid.UUID,
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+) -> list[MovementResponse]:
+    """What was used on this tooth, read back from the stock ledger.
+
+    There is no `treatment_material` table: the movement already records
+    which treatment consumed it, and a second row saying the same thing
+    would be a second answer to one question.
+    """
+    organization_id = context.require_organization()
+    await TreatmentService(db, audit).get_item(organization_id=organization_id, item_id=item_id)
+    rows = await StockService(db, audit).movements(
+        organization_id=organization_id, limit=1000, kind=StockMovementKind.CONSUMPTION
+    )
+    return [MovementResponse.model_validate(row) for row in rows if row.source_id == item_id]
+
+
+@router.post(
+    "/treatments/{item_id}/materials",
+    response_model=MovementResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permissions("inventory.consumption.record"))],
+)
+async def record_treatment_material(
+    item_id: uuid.UUID,
+    payload: TreatmentMaterialRequest,
+    context: OrgCtx,
+    db: DbSession,
+    audit: AuditDep,
+) -> MovementResponse:
+    """Record a material used on this tooth. **Posts nothing.**
+
+    The treatment is loaded first, so a quantity can never be taken off the
+    shelf against a treatment that does not exist or belongs to another
+    clinic. What the material cost is already in the books from the supplier
+    invoice; moving that cost to an expense as it is used needs the
+    valuation method nobody has declared (`OPEN_QUESTIONS.md` I1).
+    """
+    organization_id = context.require_organization()
+    treatment = await TreatmentService(db, audit).get_item(
+        organization_id=organization_id, item_id=item_id
+    )
+    movement = await StockService(db, audit).consume(
+        organization_id=organization_id,
+        item_id=payload.item_id,
+        quantity=payload.quantity,
+        location_id=payload.location_id,
+        batch_id=payload.batch_id,
+        treatment_item_id=treatment.id,
+        actor_user_id=context.user_id,
+    )
+    await db.commit()
+    return MovementResponse.model_validate(movement)
 
 
 @router.post(

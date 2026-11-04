@@ -602,3 +602,24 @@ class SettlementHistoryRow(BaseModel, MoneyMixin):
     received_on: date
     reversed_at: datetime | None
     reversal_reason: str | None
+
+
+class TreatmentMaterialRequest(BaseModel):
+    """A material used on one tooth, in the quantity actually used.
+
+    `item_id` is the material; the treatment is the path parameter. There is
+    no price here and there is not meant to be — what the material cost
+    reached the books when its supplier invoice was registered.
+    """
+
+    item_id: uuid.UUID
+    quantity: Decimal
+    location_id: uuid.UUID | None = None
+    batch_id: uuid.UUID | None = None
+
+    @field_validator("quantity", mode="before")
+    @classmethod
+    def _reject_float(cls, value: object) -> object:
+        if isinstance(value, float):
+            raise ValueError("Pass a quantity as a string or a decimal, not a binary float")
+        return value

@@ -402,6 +402,7 @@ async def create_order(
                 quantity=line.quantity,
                 unit_price=line.unit_price,
                 unit=line.unit,
+                item_id=line.item_id,
             )
             for line in payload.lines
         ],
@@ -525,6 +526,10 @@ async def receive_goods(
                 unit=line.unit,
                 rejected_quantity=line.rejected_quantity,
                 rejected_reason=line.rejected_reason,
+                item_id=line.item_id,
+                location_id=line.location_id,
+                batch_code=line.batch_code,
+                batch_expires_on=line.batch_expires_on,
             )
             for line in payload.lines
         ],

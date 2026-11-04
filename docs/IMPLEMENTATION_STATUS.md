@@ -1,6 +1,6 @@
 # Implementation status
 
-**Last updated:** 2026-11-03 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete — the money side, the clinical screens, the appointment book, partial refunds, courses of treatment and corrections, all driven in a browser. A full module audit is in `MODULE_AUDIT.md`; phases 4–7 are the remaining work.**
+**Last updated:** 2026-11-04 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete; employees, purchasing and inventory built on top of them. A full module audit is in `MODULE_AUDIT.md`; payroll, reporting, documents and hardening are the remaining work.**
 
 The authoritative record of what works. The application serves the same
 information from `GET /api/v1/platform/modules`, and an integration test
@@ -11,11 +11,11 @@ asserts nothing beyond Phase 1 reports itself as `available`.
 Every figure below was produced by running the command shown, not estimated.
 
 ```
-backend:  791 passed, 2 skipped in 279.36s   .venv/bin/python -m pytest tests
+backend:  864 passed, 2 skipped        .venv/bin/python -m pytest tests
 lint:     All checks passed!       .venv/bin/ruff check app tests alembic
 schema:   No new upgrade operations detected.   alembic check
 migrate:  downgrade base -> upgrade head: clean (every test run)
-frontend: 187 passed (187)         npm test
+frontend: 216 passed (216)         npm test
           built in 1.14s           npm run build
           0 problems               npm run lint
           0 errors                 npm run typecheck
@@ -38,6 +38,9 @@ ui e2e:   Phase 1: 12 screens driven in Chrome, each inspected
                     (frontend/e2e/employees.cjs)
           Purchasing: 15 order-to-payment steps, 0 problems
                     (frontend/e2e/purchasing.cjs)
+          Inventory: 11 steps — the shelf, the refusal, the count and
+                    the separation — 0 problems, run twice
+                    (frontend/e2e/inventory.cjs)
           Re-run after each increment: clinic, refunds, appointments,
                     plans, employees — all 0 problems
           Appointments: 15 steps driven in Chrome, 0 console errors
@@ -1249,6 +1252,125 @@ what the materials are worth and where they sit afterwards is inventory's
 question (`I1`); and a supplier payment on a bank statement has nothing to
 match against until banking's outgoing lines are built.
 
+
+## Inventory · Built
+
+Phase 4's second half, and the increment that finally lets a treatment say
+what it used. Seven tables, 18 endpoints, 73 backend tests.
+
+**Stock is a ledger, not a column** (ADR-052). There is no `quantity_on_hand`
+anywhere in this module: what is on a shelf is the sum of the movements that
+put it there and took it away, computed when asked, exactly as an account
+balance is the sum of its journal lines. A stored total is a second answer
+that drifts — and a clinic counts its shelves often enough that the drift
+gets found, usually by somebody blaming the person who counted. The test that
+pins this deletes a movement and watches the balance change.
+
+**Counted long before it is costed** (ADR-053). `OPEN_QUESTIONS.md` I1 — the
+valuation method — has never been answered, and nothing here guesses it. The
+organization declares `inventory_valuation_method`, `UNDECLARED` for
+everybody, the same shape as the revenue tax treatment beside it. While it is
+undeclared, quantities are tracked, low stock is flagged, expiry is warned
+about, and `GET /inventory/valuation` returns **every quantity with every
+cost null** rather than refusing the page. Declaring weighted average derives
+the cost from the supplier bills already on file, with no new storage; FIFO
+says it is not implemented rather than averaging and calling it FIFO.
+
+**Stock arrives through one door** (ADR-054). There is no endpoint that
+creates a receipt. Recording a delivery in purchasing is what puts stock on a
+shelf — the receipt line names the material and the accepted quantity becomes
+a movement in the same transaction — so every quantity traces back to a
+delivery note. The API test asserts the *absence* of `POST
+/inventory/receipts`, because an absence nobody checks gets filled in later
+by somebody being helpful. Only what was accepted is shelved: goods turned
+away at the door never entered the clinic.
+
+**A shelf cannot go short.** A consumption, a write-off or a transfer that
+would take more off a shelf than is on it is refused under an advisory lock
+on the item and the location — the same shape as the appointment book's lock,
+because the conflict is with a row the other transaction has not committed.
+The refusal names what is actually there, since the next thing the person
+does is go and look.
+
+**Counting and approving are two people.** A count is proposed by whoever
+counted and approved by somebody else; nothing moves until approval, and the
+approver may not be the counter even when one person holds both permissions,
+which in a clinic of three they will. The difference is recomputed *at
+approval*, not taken from the snapshot, because stock legitimately moves
+between counting and approving.
+
+### What a user can actually do
+
+- Keep a list of materials with their units, categories and shelves.
+- See what is on each shelf, by lot, and totalled per material.
+- Be warned about what is running out — only for items somebody set a level
+  on, because a made-up threshold trains people to ignore the list.
+- Be warned about lots going out of date, and only while stock is left on
+  them: a used-up lot is not a problem however old it is.
+- Record a material used on a tooth, from the treatment itself.
+- Move stock between shelves as two movements that balance to zero.
+- Write off breakage or expiry, with a reason, always audited.
+- Count a shelf, propose the difference, and have somebody else approve it.
+
+### Database-level guarantees, verified
+
+| Guarantee | Mechanism |
+| --- | --- |
+| A movement of nothing is impossible | `ck_stock_movement_quantity_not_zero` |
+| A receipt cannot remove stock, a consumption cannot add it | `ck_stock_movement_sign_matches_kind` |
+| An adjustment or write-off always says why | `ck_stock_movement_reason_required` |
+| One lot number per material | `uq_stock_batch_item_code` |
+| A material counted once per count sheet | `uq_stock_adjustment_line_once` |
+| A decided count knows who decided it and when | `ck_stock_adjustment_decided_has_time` |
+| One default shelf per organization | `uq_stock_location_single_default` |
+| No child row can name another tenant's parent | composite FK on every table |
+
+### Endpoints
+
+`/inventory/items` · `/inventory/categories` · `/inventory/locations` ·
+`/inventory/batches` · `/inventory/stock` · `/inventory/stock/low` ·
+`/inventory/stock/expiring` · `/inventory/movements` ·
+`/inventory/consumption` · `/inventory/write-offs` · `/inventory/transfers` ·
+`/inventory/counts` (+ propose, approve, reject) · `/inventory/valuation` ·
+and `/clinic/treatments/{id}/materials`, which is how a dentist records what
+a tooth consumed.
+
+### How far this is verified
+
+- 73 backend tests across `tests/inventory/`: the ledger, the negative-stock
+  refusals by every route, batches and expiry, low stock, the count's life
+  cycle and its separation of duties, tenant isolation, and that a delivery
+  and a consumption both leave the trial balance untouched.
+- 29 frontend unit tests over the quantity arithmetic and the rules the
+  screens apply.
+- `frontend/e2e/inventory.cjs`: 11 steps in a real Chrome, 0 problems, run
+  twice in a row — including that the stock screen offers no way to create
+  stock by hand, that taking 11 of 10 is refused and says what is there, that
+  the count sheet shows the difference as it is typed, that the owner who
+  counted is told why they cannot approve it and is offered no button, that
+  the server refuses the self-approval too, that the cashier is refused the
+  module outright, and that the page fits a phone in Uzbek.
+
+### A defect this increment found, which only a browser could
+
+The service put stock on a shelf correctly from the first commit, and every
+service test passed. But `ReceiptLineInputModel` — the HTTP schema — had no
+`item_id`, so a delivery recorded **through the API** named no material and
+reached no shelf. Nothing below the API layer could have caught it: the
+service was right, the tests called the service, and the gap was in the
+translation between them. It is now fixed in the schema and the router, with
+a regression test at the HTTP layer where the defect actually lived.
+
+The second was in the screen rather than the system: the shelf read
+**"10.0000 box"** where a clinic counts ten boxes. `NUMERIC(20, 4)` is the
+right column and the wrong thing to show somebody (ADR-056).
+
+### Why it still reports `partial`
+
+What the stock is worth is undeclared (`OPEN_QUESTIONS` I1), so quantities
+are kept and value is refused; posting the cost of a material as it is used
+waits on the same answer; and FIFO is deliberately not implemented.
+
 ## Next step
 
 The order comes from `docs/MODULE_AUDIT.md`, which audited all thirteen
@@ -1256,10 +1378,7 @@ modules against the code rather than against this document:
 
 1. ~~**Employees**~~ — done, above.
 2. ~~**Purchasing**~~ — done, above.
-3. **Inventory** — depends on goods receipt, so stock arrives through the
-   right door. The quantity ledger ships first; every *valuation* posting is
-   gated behind a policy rule that must be activated, because `I1` is
-   unanswered. Quantities and low-stock alerts need no valuation at all.
+3. ~~**Inventory**~~ — done, above.
 4. **Payroll** — depends on (1). Gross cost and net pay ship; every statutory
    line is produced only from an approved, versioned rule, and a run holding
    an unapproved one refuses to post and names it. `P2` and `P3` stay

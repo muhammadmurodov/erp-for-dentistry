@@ -99,8 +99,19 @@ ATTENDANCE_RECORDED: Final = "hr.attendance.recorded"
 ATTENDANCE_REMOVED: Final = "hr.attendance.removed"
 
 # --- inventory and payroll (Phase 4+) --------------------------------------
+ITEM_CREATED: Final = "inventory.item.created"
+ITEM_UPDATED: Final = "inventory.item.updated"
 STOCK_RECEIVED: Final = "inventory.stock.received"
+#: Material used on a patient. Recorded by the dentist who used it.
+STOCK_CONSUMED: Final = "inventory.stock.consumed"
+#: Stock taken off for expiry, breakage or spoiling, always with a reason.
+STOCK_WRITTEN_OFF: Final = "inventory.stock.written_off"
+STOCK_TRANSFERRED: Final = "inventory.stock.transferred"
+#: A physical count, proposed by whoever counted.
+STOCK_COUNT_PROPOSED: Final = "inventory.count.proposed"
+#: The moment stock actually moves, by somebody who did not count it.
 STOCK_ADJUSTED: Final = "inventory.stock.adjusted"
+STOCK_COUNT_REJECTED: Final = "inventory.count.rejected"
 PAYROLL_CALCULATED: Final = "payroll.run.calculated"
 PAYROLL_APPROVED: Final = "payroll.run.approved"
 PAYROLL_POSTED: Final = "payroll.run.posted"
@@ -145,6 +156,7 @@ REQUIRED_AUDIT_ACTIONS: Final[frozenset[str]] = frozenset(
         DEBT_WRITTEN_OFF,
         CASH_DISCREPANCY_APPROVED,
         STOCK_ADJUSTED,
+        STOCK_WRITTEN_OFF,
         PAYROLL_APPROVED,
         PAYROLL_POSTED,
         EMPLOYMENT_ENDED,

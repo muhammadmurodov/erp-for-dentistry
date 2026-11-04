@@ -8,8 +8,8 @@ through a published service interface.
 
 **Current state: phases 1, 2 and 3 complete and verified — the foundation, the
 accounting engine, and sales, cash and banking on top of it. The clinic module
-(3c) is complete, and employees and purchasing are built on top of it.
-Inventory, payroll, statutory reporting and documents are not built yet.**
+(3c) is complete, and employees, purchasing and inventory are built on top
+of it. Payroll, statutory reporting and documents are not built yet.**
 `docs/IMPLEMENTATION_STATUS.md` is the authoritative list of what works, down
 to which features have no interface; the application's own navigation marks
 unfinished modules rather than presenting them as done.
@@ -30,8 +30,9 @@ unfinished modules rather than presenting them as done.
 | Patients, appointments, treatment records, courses of treatment, billing | Working |
 | Employees, positions, the rota and the monthly timesheet | Working |
 | Suppliers, orders, deliveries, supplier bills and payments, payables | Working |
+| Materials, stock as a movement ledger, counts, low stock and expiry | Working |
 | The clinic's day on the home screen | Working |
-| Inventory, payroll, documents | **Not built — phases 4–5** |
+| Payroll, documents | **Not built — phases 5 and 7** |
 | Statutory reports | **Not built — phase 6** |
 
 ## Quick start

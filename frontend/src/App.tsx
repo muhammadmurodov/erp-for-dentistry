@@ -12,13 +12,13 @@ import { ClinicPage } from '@/features/clinic/ClinicPage'
 import { BankingPage } from '@/features/banking/BankingPage'
 import { EmployeesPage } from '@/features/employees/EmployeesPage'
 import { PurchasingPage } from '@/features/purchasing/PurchasingPage'
+import { InventoryPage } from '@/features/inventory/InventoryPage'
 import { ModulePlaceholder } from '@/features/modules/ModulePlaceholder'
 import { useI18n } from '@/i18n'
 import { Alert, EmptyState, LoadingState, PageHeader } from '@/components/ui'
 
 /** Modules whose screens are not built yet; each renders an honest placeholder. */
 const PLACEHOLDER_ROUTES = [
-  { path: 'inventory', key: 'inventory', titleKey: 'inventory' },
   { path: 'payroll', key: 'payroll', titleKey: 'payroll' },
   { path: 'reports', key: 'reports', titleKey: 'reports' },
   { path: 'documents', key: 'documents', titleKey: 'documents' },
@@ -72,6 +72,7 @@ export function App() {
         <Route path="banking/*" element={<BankingPage />} />
         <Route path="employees/*" element={<EmployeesPage />} />
         <Route path="purchases/*" element={<PurchasingPage />} />
+        <Route path="inventory/*" element={<InventoryPage />} />
         <Route path="accounting/*" element={<AccountingPage />} />
         <Route path="settings/*" element={<SettingsPage />} />
         <Route path="404" element={<NotFound />} />

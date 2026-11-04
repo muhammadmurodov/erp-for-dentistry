@@ -21,6 +21,7 @@ they can be re-run after a change instead of re-done:
 | `plans.cjs` | a course of treatment across visits, and correcting a record | the owner, then the cashier |
 | `employees.cjs` | hiring, the rota, the monthly timesheet, ending an employment | the owner, then the cashier |
 | `purchasing.cjs` | order, deliver, invoice, pay — and what each one posts | the owner, then reception |
+| `inventory.cjs` | the shelf: a delivery arriving, a refusal to go short, a count somebody else approves | the owner, then the cashier |
 
 Between them they have found eighteen defects, two of them in code that had
 been passing its unit tests since Phase 2, and two that no test run could have
@@ -184,33 +185,34 @@ of:
 - reception being offered the module, shown a supplier, or given no reason;
 - the screens overflowing a phone, or showing English in Uzbek.
 
-It runs against the **demo** tenant rather than `verify-3d`, and the reason
-is itself a finding: it has to supersede the accounting policy, because a
-tenant whose policy was activated before purchasing existed has no rule for a
-supplier invoice. `verify-3d` cannot be superseded from today — repeated
-`policy.cjs` runs have pushed its newest version's effective date years into
-the future, and a new version must start after the one it replaces. That
-refusal is correct; it just makes that tenant the wrong place to do this.
+`inventory.cjs` drives the store cupboard, and exists mainly to check three
+things that no unit test can show reaching a person: that stock arrives
+through the delivery rather than by hand, that a shelf cannot go short, and
+that counting and approving are two people. It reads the trial balance
+around both the delivery and the consumption, because the central claim of
+the module is that moving a quantity posts nothing. It fails on any of:
 
-`policy.cjs` drives the policy editor as the owner — the only role that may
-change it — building a version, adding and editing rules, putting it into
-force, discarding a mistaken draft, and checking that an accountant sees the
-same screen with no control that changes it. A step declares the HTTP
-refusals it means to provoke, so the application correctly refusing something
-is not reported as a fault.
+- the stock screen offering any way to create stock by hand;
+- a delivery not reaching the shelf, or reaching it while moving 1010, 6010
+  or 5010;
+- a material used on a patient moving any account at all;
+- taking more off a shelf than is on it being allowed, or the refusal not
+  saying what is actually there;
+- a material with a reorder level and no stock not being reported as low, or
+  still being reported after a delivery;
+- the count sheet not showing the difference as it is typed, or not saying
+  that saving moves nothing;
+- saving a count changing the shelf before anybody approved it;
+- the approve button being offered to whoever counted, or the server
+  allowing that approval;
+- the valuation panel showing a number instead of saying that no method has
+  been chosen;
+- the cashier reaching the module or being given no reason;
+- the screens overflowing a phone, or showing English in Uzbek.
 
-All of them are re-runnable against the same tenant: `banking.cjs` creates its
-own bank account and seeds its own card payment, `policy.cjs` takes its
-effective date from whatever is in force and clears any draft left behind, and
-`clinic.cjs` creates its own staff, service and patients, then banks what it
-took and closes the drawer it opened — a cash account may only hold what the
-ledger says it holds, so a pass that left money in the till would be refused
-the next time it tried to open one. `small-clinic.cjs` does not assume what
-the drawer holds either: it asks for a float of nothing and reads the
-refusal, which is how it learns what the previous session counted without
-reimplementing the rule.
-
-Screenshots of every step land in `e2e/shots/`, which is not committed.
+It creates its own material with a unique code, writes off what it bought and
+deactivates the material at the end, so it can be run twice in a row — and
+is.
 
 ## Running it
 
@@ -243,6 +245,7 @@ node frontend/e2e/appointments.cjs
 node frontend/e2e/plans.cjs
 node frontend/e2e/employees.cjs
 node frontend/e2e/purchasing.cjs
+node frontend/e2e/inventory.cjs
 ```
 
 `/auth/login` is rate-limited to ten a minute, which is a control and not an

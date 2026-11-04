@@ -10,7 +10,18 @@ import type {
   AttendanceDay,
   AttendanceSummary,
   Employee,
+  ExpiringRow,
   GoodsReceipt,
+  InventoryCategory,
+  InventoryItem,
+  LowStockRow,
+  StockBalanceRow,
+  StockBatch,
+  StockCount,
+  StockCountDetail,
+  StockLocation,
+  StockMovement,
+  StockValuation,
   PayablesAgeingRow,
   PurchaseOrder,
   PurchaseOrderDetail,
@@ -139,6 +150,22 @@ export const queryKeys = {
   supplierPayments: (filters: Record<string, unknown>) =>
     ['purchasing', 'payments', filters] as const,
   payablesAgeing: ['purchasing', 'payables', 'ageing'] as const,
+  inventoryItems: (filters: Record<string, unknown>) =>
+    ['inventory', 'items', filters] as const,
+  inventoryCategories: ['inventory', 'categories'] as const,
+  stockLocations: ['inventory', 'locations'] as const,
+  stockBatches: (itemId: string) => ['inventory', 'batches', itemId] as const,
+  stockBalances: (filters: Record<string, unknown>) =>
+    ['inventory', 'stock', filters] as const,
+  lowStock: ['inventory', 'stock', 'low'] as const,
+  expiringStock: (withinDays: number) => ['inventory', 'stock', 'expiring', withinDays] as const,
+  stockMovements: (filters: Record<string, unknown>) =>
+    ['inventory', 'movements', filters] as const,
+  stockCounts: (filters: Record<string, unknown>) => ['inventory', 'counts', filters] as const,
+  stockCount: (id: string) => ['inventory', 'count', id] as const,
+  stockValuation: ['inventory', 'valuation'] as const,
+  treatmentMaterials: (itemId: string) =>
+    ['clinic', 'treatment', itemId, 'materials'] as const,
   employees: (filters: Record<string, unknown>) => ['hr', 'employees', filters] as const,
   employee: (id: string) => ['hr', 'employee', id] as const,
   positions: ['hr', 'positions'] as const,
@@ -938,3 +965,136 @@ export function usePayablesAgeing(
     enabled,
   })
 }
+
+// --- inventory --------------------------------------------------------------
+
+export function useInventoryItems(
+  filters: { search?: string; category_id?: string; include_inactive?: boolean },
+  enabled: boolean,
+): UseQueryResult<InventoryItem[]> {
+  return useQuery({
+    queryKey: queryKeys.inventoryItems(filters),
+    queryFn: () => api.get<InventoryItem[]>('/inventory/items', filters),
+    enabled,
+  })
+}
+
+export function useInventoryCategories(enabled: boolean): UseQueryResult<InventoryCategory[]> {
+  return useQuery({
+    queryKey: queryKeys.inventoryCategories,
+    queryFn: () => api.get<InventoryCategory[]>('/inventory/categories'),
+    enabled,
+  })
+}
+
+export function useStockLocations(enabled: boolean): UseQueryResult<StockLocation[]> {
+  return useQuery({
+    queryKey: queryKeys.stockLocations,
+    queryFn: () => api.get<StockLocation[]>('/inventory/locations'),
+    enabled,
+  })
+}
+
+export function useStockBatches(
+  itemId: string | null,
+  enabled: boolean,
+): UseQueryResult<StockBatch[]> {
+  return useQuery({
+    queryKey: queryKeys.stockBatches(itemId ?? ''),
+    queryFn: () => api.get<StockBatch[]>('/inventory/batches', { item_id: itemId ?? undefined }),
+    enabled: Boolean(itemId) && enabled,
+  })
+}
+
+/**
+ * What is on the shelves.
+ *
+ * Never cached beyond the moment it is shown: a stale balance is how
+ * somebody promises a material that another surgery has already used.
+ */
+export function useStockBalances(
+  filters: { item_id?: string; location_id?: string },
+  enabled: boolean,
+): UseQueryResult<StockBalanceRow[]> {
+  return useQuery({
+    queryKey: queryKeys.stockBalances(filters),
+    queryFn: () => api.get<StockBalanceRow[]>('/inventory/stock', filters),
+    enabled,
+    staleTime: 0,
+  })
+}
+
+export function useLowStock(enabled: boolean): UseQueryResult<LowStockRow[]> {
+  return useQuery({
+    queryKey: queryKeys.lowStock,
+    queryFn: () => api.get<LowStockRow[]>('/inventory/stock/low'),
+    enabled,
+    staleTime: 0,
+  })
+}
+
+export function useExpiringStock(
+  withinDays: number,
+  enabled: boolean,
+): UseQueryResult<ExpiringRow[]> {
+  return useQuery({
+    queryKey: queryKeys.expiringStock(withinDays),
+    queryFn: () => api.get<ExpiringRow[]>('/inventory/stock/expiring', { within_days: withinDays }),
+    enabled,
+    staleTime: 0,
+  })
+}
+
+export function useStockMovements(
+  filters: { item_id?: string; location_id?: string; kind?: string; limit?: number },
+  enabled: boolean,
+): UseQueryResult<StockMovement[]> {
+  return useQuery({
+    queryKey: queryKeys.stockMovements(filters),
+    queryFn: () => api.get<StockMovement[]>('/inventory/movements', filters),
+    enabled,
+  })
+}
+
+export function useStockCounts(
+  filters: { status?: string },
+  enabled: boolean,
+): UseQueryResult<StockCount[]> {
+  return useQuery({
+    queryKey: queryKeys.stockCounts(filters),
+    queryFn: () => api.get<StockCount[]>('/inventory/counts', filters),
+    enabled,
+  })
+}
+
+export function useStockCount(
+  countId: string | null,
+  enabled: boolean,
+): UseQueryResult<StockCountDetail> {
+  return useQuery({
+    queryKey: queryKeys.stockCount(countId ?? ''),
+    queryFn: () => api.get<StockCountDetail>(`/inventory/counts/${countId}`),
+    enabled: Boolean(countId) && enabled,
+  })
+}
+
+export function useStockValuation(enabled: boolean): UseQueryResult<StockValuation> {
+  return useQuery({
+    queryKey: queryKeys.stockValuation,
+    queryFn: () => api.get<StockValuation>('/inventory/valuation'),
+    enabled,
+  })
+}
+
+export function useTreatmentMaterials(
+  treatmentItemId: string | null,
+  enabled: boolean,
+): UseQueryResult<StockMovement[]> {
+  return useQuery({
+    queryKey: queryKeys.treatmentMaterials(treatmentItemId ?? ''),
+    queryFn: () =>
+      api.get<StockMovement[]>(`/clinic/treatments/${treatmentItemId}/materials`),
+    enabled: Boolean(treatmentItemId) && enabled,
+  })
+}
+
