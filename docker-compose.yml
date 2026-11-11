@@ -64,6 +64,12 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_URL: redis://redis:6379/0
+      # Uploaded documents outlive the container. The database holds each
+      # file's checksum and this volume holds its bytes, so the two must be
+      # backed up together or a restore cannot be verified.
+      DOCUMENT_STORAGE_PATH: /var/lib/erp/documents
+    volumes:
+      - documents:/var/lib/erp/documents
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -115,3 +121,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  documents:

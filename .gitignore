@@ -33,6 +33,9 @@ dist/
 pgdata/
 *.log
 
+# Uploaded documents: business data, never in version control
+backend/var/
+
 # Reference workbook: business data, keep out of version control
 reference/*.xlsm
 reference/*.xlsx

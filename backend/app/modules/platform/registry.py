@@ -338,9 +338,37 @@ MODULES: tuple[ModuleInfo, ...] = (
     ModuleInfo(
         key="documents",
         phase=7,
-        status=ModuleStatus.PLANNED,
+        # PARTIAL, and the remaining gap is a policy one rather than a
+        # technical one: files are stored, checksummed, filed against the
+        # record they are about and verifiable after a restore, but nothing
+        # here destroys anything, because how long a clinic must keep a
+        # signed contract is OPEN_QUESTIONS D1 and nobody has answered it.
+        # A system that quietly deleted evidence on a guessed schedule would
+        # be worse than one that keeps too much.
+        status=ModuleStatus.PARTIAL,
         required_permission="document.read",
-        missing_features=("document upload", "attachment to business records"),
+        available_features=(
+            "uploading a document, with its type and contents checked against "
+            "an allowlist",
+            "filing one against the record it is about: a patient, an "
+            "employee, a bill, a supplier, a payment, a payroll run",
+            "a SHA-256 taken at upload and checked again on every download",
+            "download refused, and recorded, when the stored bytes no longer "
+            "match that checksum",
+            "verifying the whole store against the database, which is how a "
+            "restored backup is proved rather than hoped about",
+            "replacing a document, the older one superseded and kept",
+            "archiving with a reason; nothing is destroyed",
+            "who downloaded which document, and when",
+        ),
+        missing_features=(
+            "deleting anything at all: the retention and destruction policy "
+            "is undecided (OPEN_QUESTIONS D1), so documents are archived and "
+            "kept",
+            "scanning uploads for malware, which needs a scanner this "
+            "deployment does not have",
+            "full-text search inside a document's contents",
+        ),
     ),
     ModuleInfo(
         key="settings",

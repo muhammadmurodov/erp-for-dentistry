@@ -566,12 +566,33 @@ consumption is a per-treatment event or a monthly adjustment.
 
 ## D. Operations
 
-### D1 — Backup and retention policy · Blocking go-live
+### D1 — Backup and retention policy · Blocking *destruction* only
 **Needed from:** owner
 
 **Asked as:** how long must financial records be retained? (Uzbek law
 prescribes a minimum; please confirm.) Where should backups be stored, and who
 may restore? A restore must be *tested*, not merely configured.
+
+**What the system does meanwhile (2026-11-09).** The documents module is
+built and does not wait for this answer, because the unanswered half is
+*when a document may be destroyed* — and the safe direction is to keep it.
+
+* Nothing is ever deleted. There is no delete endpoint and no deleted
+  status; a document is **archived with a reason** and keeps its bytes.
+* Every file's SHA-256 is recorded at upload and **checked again on every
+  download**. A file whose bytes stopped matching is refused, and the refusal
+  is written in its own transaction so it survives the failed request.
+* `python -m app.cli verify-documents` re-checksums the whole store against
+  the database and exits non-zero if anything is missing or corrupted. This
+  is the **restore test** the question asks for: restore the database and the
+  document store together, run it, and a clean result is the statement that
+  the restore is sound. `GET /documents/verify` is the same check from the
+  screen.
+* Files on disk that no database row claims are **reported, never removed**.
+
+What is still blocked is a retention *schedule*: nothing can be lawfully
+destroyed until somebody says how long it must be kept, and where backups
+live is still an operational decision nobody has recorded.
 
 ---
 

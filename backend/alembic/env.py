@@ -22,6 +22,7 @@ from app.modules.audit import models as audit_models  # noqa: F401
 from app.modules.banking import models as banking_models  # noqa: F401
 from app.modules.cash import models as cash_models  # noqa: F401
 from app.modules.clinic import models as clinic_models  # noqa: F401
+from app.modules.document import models as document_models  # noqa: F401
 from app.modules.hr import models as hr_models  # noqa: F401
 from app.modules.identity import models as identity_models  # noqa: F401
 from app.modules.inventory import models as inventory_models  # noqa: F401

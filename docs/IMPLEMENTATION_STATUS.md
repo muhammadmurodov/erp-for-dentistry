@@ -1,6 +1,6 @@
 # Implementation status
 
-**Last updated:** 2026-11-04 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete; employees, purchasing, inventory, management reporting and payroll built on top of them. A full module audit is in `MODULE_AUDIT.md`; documents and hardening are the remaining work. Payroll computes, approves and posts, and is blocked from posting today because the current social tax rate is unverified (P2) — which is the control working, not a gap.**
+**Last updated:** 2026-11-09 · **Phases 1–2 complete; Phase 3 sales, receivables, cash and banking complete and verified in a browser; Phase 3c clinic complete; employees, purchasing, inventory, management reporting and payroll built on top of them. A full module audit is in `MODULE_AUDIT.md`. The documents module is built (upload, filing against a business record, checksum verification and a restore test; nothing is ever deleted while retention is undecided), so hardening is the remaining work. `EVIDENCE_AND_GAPS.md` states, for every open question, what the workbook proves, what is built, what is genuinely missing and whether posting stays blocked. Payroll computes, approves and posts, and is blocked from posting today because the current social tax rate is unverified (P2) — which is the control working, not a gap.**
 
 The authoritative record of what works. The application serves the same
 information from `GET /api/v1/platform/modules`, and an integration test

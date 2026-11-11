@@ -65,6 +65,18 @@ class Settings(BaseSettings):
     # this is only the fallback used before an organization is resolved.
     default_currency: str = "UZS"
 
+    # Documents. The store is a directory this process owns: it is written
+    # with restrictive modes, no web server is pointed at it, and it must be
+    # included in the backup that covers the database, because a document's
+    # checksum lives in one and its bytes in the other. A relative path is
+    # resolved against the backend working directory, which is what a
+    # developer gets; a deployment sets an absolute path on a mounted volume.
+    document_storage_path: str = "var/documents"
+    #: A signed contract is a scan; an X-ray is bigger. Above this, somebody
+    #: is uploading the wrong thing, and finding out by reading it into
+    #: memory is not worth it.
+    document_max_upload_mb: int = 25
+
     @field_validator("log_level")
     @classmethod
     def _upper(cls, value: str) -> str:
@@ -104,6 +116,11 @@ class Settings(BaseSettings):
                 path=self.postgres_db,
             )
         )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def document_max_upload_bytes(self) -> int:
+        return self.document_max_upload_mb * 1024 * 1024
 
     @property
     def is_production(self) -> bool:

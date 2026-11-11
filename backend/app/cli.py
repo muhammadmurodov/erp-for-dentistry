@@ -196,5 +196,58 @@ async def _create_organization(
     typer.echo(f"Created {organization.code!r} (id={organization.id}); owner {owner.email}")
 
 
+@app.command("verify-documents")
+def verify_documents(
+    show_orphans: bool = typer.Option(
+        True, help="Also report files on disk that no document row claims"
+    ),
+) -> None:
+    """Check every stored document against the checksum recorded at upload.
+
+    **This is the restore test.** A backup nobody has read back is a belief
+    about a disk. After restoring the database and the document store
+    together, run this: it re-reads every file, re-computes its SHA-256 and
+    compares it with the database. A clean run is the statement that the
+    restored store is the store that was backed up.
+
+    Exit code is 1 when anything is missing or corrupted, so it can be run
+    from cron or a deployment check without reading the output.
+    """
+    settings = get_settings()
+    configure_logging(settings.log_level, "console")
+    failed = asyncio.run(_verify_documents(show_orphans=show_orphans))
+    raise typer.Exit(code=1 if failed else 0)
+
+
+async def _verify_documents(*, show_orphans: bool) -> bool:
+    from app.modules.document.services.documents import DocumentService
+
+    factory = get_session_factory()
+    async with factory() as session:
+        audit = AuditRecorder(session, actor_label="cli:verify-documents")
+        service = DocumentService(session, audit)
+        result = await service.verify_store()
+        typer.echo(f"store    : {service.storage.root}")
+        typer.echo(f"checked  : {result.checked}")
+        typer.echo(f"intact   : {result.intact}")
+        for key in result.missing:
+            typer.echo(f"MISSING  : {key}")
+        for key in result.corrupted:
+            typer.echo(f"CORRUPT  : {key}")
+        if show_orphans:
+            known = await service.known_storage_keys()
+            for key in service.storage.orphans(known):
+                # Reported, never removed: an orphan is usually an upload
+                # whose transaction rolled back, and occasionally a restore
+                # of a newer store over an older database. Both are worth
+                # looking at; neither is worth deleting automatically.
+                typer.echo(f"ORPHAN   : {key}")
+        if result.ok:
+            typer.echo("\nEvery stored document matches its recorded checksum.")
+        else:
+            typer.echo("\nThe document store does not match the database.")
+        return not result.ok
+
+
 if __name__ == "__main__":
     app()

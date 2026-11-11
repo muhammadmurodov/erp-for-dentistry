@@ -147,6 +147,15 @@ PLAN_CREATED: Final = "clinic.plan.created"
 #: Moving a course of treatment between states — proposed, accepted, abandoned.
 PLAN_STATUS_CHANGED: Final = "clinic.plan.status_changed"
 
+# --- documents --------------------------------------------------------------
+DOCUMENT_UPLOADED: Final = "document.uploaded"
+DOCUMENT_ARCHIVED: Final = "document.archived"
+DOCUMENT_RESTORED: Final = "document.restored"
+#: The stored bytes stopped matching the checksum recorded at upload. Written
+#: even though the request fails, because this is how a clinic finds out its
+#: evidence was damaged or tampered with.
+DOCUMENT_INTEGRITY_FAILED: Final = "document.integrity_failed"
+
 # --- privacy ----------------------------------------------------------------
 CLINICAL_RECORD_READ: Final = "clinic.clinical.read"
 DOCUMENT_DOWNLOADED: Final = "document.downloaded"
@@ -186,5 +195,8 @@ REQUIRED_AUDIT_ACTIONS: Final[frozenset[str]] = frozenset(
         CLINICAL_RECORD_READ,
         PATIENT_MERGED,
         TREATMENT_COMPLETED,
+        DOCUMENT_UPLOADED,
+        DOCUMENT_ARCHIVED,
+        DOCUMENT_INTEGRITY_FAILED,
     }
 )

@@ -238,17 +238,25 @@ management report above is derivable from the ledger with the
 brief draws — internal management reports now, statutory forms blocked — is
 exactly right and already supported by the data model.
 
-### 12. Documents — ○
+### 12. Documents — ◐ *(built 2026-11-09)*
 
-**Everything.** Needs: stored document, category, link to a business record,
-content storage, access control, download audit.
+**Works:** upload with an allowlist of types checked against the file's own
+signature; filing against any of eleven business records, checked to exist in
+the same organization; SHA-256 recorded at upload and re-checked on every
+download; a refused download when the bytes no longer match, recorded in its
+own transaction so it survives the failed request; whole-store verification
+from the API and from `app.cli verify-documents`; supersession; archiving
+with a mandatory reason; a per-download access log kept separately from the
+audit trail.
 
-**Has already:** two `document.*` permissions, held by every role at read level.
+**Missing:** deletion of anything (see below), malware scanning, full-text
+search inside contents.
 
-**Blocked on:** D1 (retention policy) for *deletion* rules only. Storage
-location is an operational decision: local filesystem under the app's data
-directory is the only option without new infrastructure, and is what this will
-use unless told otherwise.
+**Blocked on:** D1 (retention policy) for *deletion* rules only — so nothing
+is deleted, which is the safe direction. Storage is the local filesystem
+under a configured data directory, as anticipated here; in Docker it is a
+named volume that must be backed up alongside the database, because the
+checksum lives in one and the bytes in the other.
 
 ### 13. Settings — ◐
 
